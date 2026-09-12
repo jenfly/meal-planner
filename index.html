@@ -513,7 +513,7 @@ function renderMeals(){
   const list = document.getElementById('meals-list');
   const sortRow = document.getElementById('sort-row');
   if(meals.length===0){
-    list.innerHTML = '<div class="empty">No meals saved yet"</div>';
+    list.innerHTML = '<div class="empty">No meals saved yet</div>';
     if(sortRow) sortRow.style.display = 'none';
     return;
   }
