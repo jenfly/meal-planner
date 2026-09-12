@@ -513,7 +513,7 @@ function renderMeals(){
   const list = document.getElementById('meals-list');
   const sortRow = document.getElementById('sort-row');
   if(meals.length===0){
-    list.innerHTML = '<div class="empty">No meals saved yet. Add the combos you already know you like — like "tortellini with tomato sauce and bagged salad."</div>';
+    list.innerHTML = '<div class="empty">No meals saved yet"</div>';
     if(sortRow) sortRow.style.display = 'none';
     return;
   }
@@ -821,7 +821,7 @@ document.getElementById('add-extra').addEventListener('click', async ()=>{
 
 /* One-time setup: see README "Setting up Google Drive backup".
    Uses drive.file scope (access limited to this app's own backup file). */
-const GOOGLE_CLIENT_ID = 'YOUR_CLIENT_ID.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = '102552410450-jl9u86qhro3inldncn2sfhv4r08007hi.apps.googleusercontent.com';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const BACKUP_FILENAME = 'meal-rotation-backup.json';
 const BACKUP_REMINDER_DAYS = 30;
