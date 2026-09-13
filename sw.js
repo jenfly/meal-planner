@@ -1,4 +1,4 @@
-const CACHE_NAME = 'meal-planner-v4';
+const CACHE_NAME = 'meal-planner-v5';
 const FILES_TO_CACHE = [
   './',
   './index.html',

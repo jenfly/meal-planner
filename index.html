@@ -377,6 +377,9 @@
     box-shadow:0 6px 16px rgba(0,0,0,0.14);
     border-radius:8px;
   }
+  .shop-item.shift-anim{
+    transition:transform 150ms ease;
+  }
   .drag-handle{
     display:flex;
     align-items:center;
@@ -999,44 +1002,91 @@ function beginShopDrag(e, rowEl){
   e.preventDefault();
   const container = rowEl.parentElement;
   const groupAttr = rowEl.dataset.checked;
-  let siblings = Array.from(container.querySelectorAll('.shop-item')).filter(el=>el.dataset.checked===groupAttr);
-  let startY = e.clientY;
+  // Siblings and their rects are captured once, up front, and never touched
+  // again until drop. During the drag we only ever apply CSS transforms
+  // (dragged row tracks the pointer, displaced rows slide by one row-height)
+  // — nothing reflows mid-drag, so there's nothing for the maths to drift
+  // against. The DOM is only actually reordered once, on release.
+  const siblings = Array.from(container.querySelectorAll('.shop-item')).filter(el=>el.dataset.checked===groupAttr);
+  const draggedIndex = siblings.indexOf(rowEl);
+  const rects = new Map(siblings.map(el=>[el, el.getBoundingClientRect()]));
+  const draggedHeight = rects.get(rowEl).height;
+  const afterEl = siblings[siblings.length-1].nextElementSibling;
+  const startY = e.clientY;
   const pointerId = e.pointerId;
   rowEl.classList.add('dragging');
+  siblings.forEach(el=>{ if(el!==rowEl) el.classList.add('shift-anim'); });
   try{ rowEl.setPointerCapture(pointerId); }catch(err){}
+
+  let latestOrder = siblings.slice();
 
   function onMove(ev){
     const dy = ev.clientY - startY;
     rowEl.style.transform = `translateY(${dy}px)`;
-    const centerY = ev.clientY;
-    const idx = siblings.indexOf(rowEl);
-    for(const sib of siblings){
-      if(sib===rowEl) continue;
-      const rect = sib.getBoundingClientRect();
-      const sibCenter = rect.top + rect.height/2;
-      const sibIdx = siblings.indexOf(sib);
-      if(sibIdx < idx && centerY < sibCenter){
-        container.insertBefore(rowEl, sib);
-        startY += rect.height;
-        rowEl.style.transform = `translateY(${ev.clientY - startY}px)`;
-        siblings = Array.from(container.querySelectorAll('.shop-item')).filter(el=>el.dataset.checked===groupAttr);
-        break;
-      } else if(sibIdx > idx && centerY > sibCenter){
-        container.insertBefore(rowEl, sib.nextSibling);
-        startY -= rect.height;
-        rowEl.style.transform = `translateY(${ev.clientY - startY}px)`;
-        siblings = Array.from(container.querySelectorAll('.shop-item')).filter(el=>el.dataset.checked===groupAttr);
-        break;
+    const draggedCenter = rects.get(rowEl).top + dy + draggedHeight/2;
+
+    const aboveStay = [], aboveMoved = [], belowMoved = [], belowStay = [];
+    siblings.forEach((sib, idx)=>{
+      if(sib===rowEl) return;
+      const r = rects.get(sib);
+      const sibCenter = r.top + r.height/2;
+      if(idx < draggedIndex){
+        const displaced = draggedCenter < sibCenter;
+        sib.style.transform = displaced ? `translateY(${draggedHeight}px)` : '';
+        (displaced ? aboveMoved : aboveStay).push(sib);
+      } else {
+        const displaced = draggedCenter > sibCenter;
+        sib.style.transform = displaced ? `translateY(${-draggedHeight}px)` : '';
+        (displaced ? belowMoved : belowStay).push(sib);
       }
-    }
+    });
+    latestOrder = [...aboveStay, ...belowMoved, rowEl, ...aboveMoved, ...belowStay];
   }
 
   function onUp(ev){
     document.removeEventListener('pointermove', onMove);
     document.removeEventListener('pointerup', onUp);
-    rowEl.classList.remove('dragging');
-    rowEl.style.transform = '';
     try{ rowEl.releasePointerCapture(pointerId); }catch(err){}
+
+    // FLIP the settle: capture where every row is actually sitting right
+    // now (including the dragged row's tracked-to-the-pointer position),
+    // reorder + zero out transforms, then measure where that leaves them
+    // and invert the jump into a transform so it can play back out as a
+    // transition. Anything looser (e.g. just clearing transforms next to
+    // the reorder) risks a one-frame double-counted offset.
+    const beforeRects = new Map(siblings.map(el=>[el, el.getBoundingClientRect()]));
+
+    latestOrder.forEach(el=> container.insertBefore(el, afterEl));
+
+    siblings.forEach(el=>{
+      el.classList.remove('shift-anim');
+      el.style.transition = 'none';
+      el.style.transform = '';
+    });
+
+    siblings.forEach(el=>{
+      const before = beforeRects.get(el);
+      const after = el.getBoundingClientRect();
+      const dy = before.top - after.top;
+      if(Math.abs(dy) > 0.5) el.style.transform = `translateY(${dy}px)`;
+    });
+    void container.offsetHeight;
+
+    requestAnimationFrame(()=>{
+      siblings.forEach(el=>{
+        el.style.transition = '';
+        el.classList.add('shift-anim');
+        el.style.transform = '';
+      });
+      setTimeout(()=>{
+        siblings.forEach(el=>{
+          el.classList.remove('shift-anim');
+          el.style.transition = '';
+        });
+        rowEl.classList.remove('dragging');
+      }, 170);
+    });
+
     finalizeShopOrder();
   }
 
