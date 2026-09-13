@@ -1249,6 +1249,8 @@ const BACKUP_REMINDER_DAYS = 30;
 
 let gisReady = false;
 let tokenClient = null;
+let cachedToken = null;
+let cachedTokenExpiresAt = 0;
 
 function loadGis(){
   return new Promise((resolve, reject)=>{
@@ -1262,8 +1264,16 @@ function loadGis(){
   });
 }
 
-function getAccessToken(){
+// Reuses the in-memory token while it's still valid, then tries a silent
+// (prompt-less) renewal — which succeeds without any UI as long as the
+// browser still has a Google session and the user granted access before —
+// and only falls back to the full consent screen if that silent attempt fails.
+function getAccessToken(forceConsent){
   return new Promise((resolve, reject)=>{
+    if(!forceConsent && cachedToken && Date.now() < cachedTokenExpiresAt){
+      resolve(cachedToken);
+      return;
+    }
     if(!tokenClient){
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: GOOGLE_CLIENT_ID,
@@ -1272,10 +1282,19 @@ function getAccessToken(){
       });
     }
     tokenClient.callback = (resp)=>{
-      if(resp.error){ reject(resp); return; }
+      if(resp.error){
+        if(!forceConsent){
+          getAccessToken(true).then(resolve, reject);
+        } else {
+          reject(resp);
+        }
+        return;
+      }
+      cachedToken = resp.access_token;
+      cachedTokenExpiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000 - 60000;
       resolve(resp.access_token);
     };
-    tokenClient.requestAccessToken({ prompt: 'consent' });
+    tokenClient.requestAccessToken({ prompt: forceConsent ? 'consent' : '' });
   });
 }
 
