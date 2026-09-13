@@ -488,11 +488,28 @@ const MEAL_COLORS = [
   { bg:'#F2E3E9', fg:'#8C3F5F' }, // berry
   { bg:'#E3F0EC', fg:'#2F7A63' }, // teal
   { bg:'#F2ECE3', fg:'#8C6B3F' }, // tan
+  { bg:'#EDF0D6', fg:'#74842E' }, // olive
+  { bg:'#E2E4F5', fg:'#4A4A9E' }, // indigo
+  { bg:'#F7E3ED', fg:'#A13F72' }, // rose
+  { bg:'#E6EAEC', fg:'#4C6270' }, // slate
 ];
-function mealColor(id){
-  let hash = 0;
-  for(let i=0;i<id.length;i++){ hash = (hash*31 + id.charCodeAt(i)) >>> 0; }
-  return MEAL_COLORS[hash % MEAL_COLORS.length];
+
+// Colors are assigned by order of first appearance among meals currently
+// selected somewhere in the week, so pills stay consistent with each other
+// while the week is populated but can shift once everything is cleared and
+// re-picked later.
+function assignWeekMealColors(){
+  const colorMap = {};
+  let next = 0;
+  DAYS.forEach(d=>{
+    (week[d]||[]).forEach(id=>{
+      if(!(id in colorMap)){
+        colorMap[id] = MEAL_COLORS[next % MEAL_COLORS.length];
+        next++;
+      }
+    });
+  });
+  return colorMap;
 }
 
 function uid(){ return 'm_' + Math.random().toString(36).slice(2,9); }
@@ -763,6 +780,7 @@ function renderWeek(){
     card.innerHTML = '<div class="empty">Add some meals first, then come back to plan the week.</div>';
     return;
   }
+  const weekColors = assignWeekMealColors();
   card.innerHTML = DAYS.map(d=>{
     const selectedIds = week[d] || [];
     const selectedMeals = selectedIds.map(id=>meals.find(m=>m.id===id)).filter(Boolean);
@@ -777,7 +795,7 @@ function renderWeek(){
             ${selectedMeals.length===0
               ? '<span class="multiselect-placeholder">— not planned —</span>'
               : selectedMeals.map(m=>{
-                  const c = mealColor(m.id);
+                  const c = weekColors[m.id];
                   return `
                   <span class="multiselect-selected-item" style="background:${c.bg};color:${c.fg};">
                     ${escapeHtml(m.name)}
