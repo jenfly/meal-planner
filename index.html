@@ -188,7 +188,7 @@
     padding:10px 16px;font-size:14px;color:var(--ink-soft);cursor:pointer;
     width:100%;
   }
-  input[type=text], textarea, select{
+  input[type=text], input[type=date], textarea, select{
     width:100%;
     font-size:15px;
     padding:9px 10px;
@@ -223,6 +223,24 @@
     font-weight:600;
     margin:0 0 8px;
     color:var(--ink);
+  }
+  .day-heading-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin:0 0 8px;
+  }
+  .day-heading-row .day-heading{margin:0;}
+  .mark-made-btn{width:32px;height:32px;flex-shrink:0;}
+  .mark-made-btn svg{width:16px;height:16px;}
+  .mark-made-panel{
+    padding:12px;
+    margin-top:8px;
+  }
+  .mark-made-panel-label{
+    font-size:13px;
+    color:var(--ink-soft);
+    margin-bottom:8px;
   }
   .slot-row{
     display:flex;
@@ -483,6 +501,8 @@ let editingId = null;
 let mealSort = localStorage.getItem('mealRotation.mealSort') || 'due';
 let openMealDayPicker = null;
 let confirmDeleteId = null;
+let openMarkMadeDay = null;
+let markMadeDateOverride = {};
 
 const MEAL_COLORS = [
   { bg:'#E7EEE1', fg:'#3E5236' }, // sage
@@ -576,12 +596,35 @@ const ICON_CALENDAR_PLUS = '<svg viewBox="0 0 448 512"><path fill="currentColor"
 const ICON_PEN = '<svg viewBox="0 0 512 512"><path fill="currentColor" d="M471.6 21.7c-21.9-21.9-57.3-21.9-79.2 0L368 46.1 465.9 144 490.3 119.6c21.9-21.9 21.9-57.3 0-79.2L471.6 21.7zm-299.2 220c-6.1 6.1-10.8 13.6-13.5 21.9l-29.6 88.8c-2.9 8.6-.6 18.1 5.8 24.6s15.9 8.7 24.6 5.8l88.8-29.6c8.2-2.7 15.7-7.4 21.9-13.5L432 177.9 334.1 80 172.4 241.7zM96 64C43 64 0 107 0 160L0 416c0 53 43 96 96 96l256 0c53 0 96-43 96-96l0-96c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 96c0 17.7-14.3 32-32 32L96 448c-17.7 0-32-14.3-32-32l0-256c0-17.7 14.3-32 32-32l96 0c17.7 0 32-14.3 32-32s-14.3-32-32-32L96 64z"/></svg>';
 const ICON_TRASH = '<svg viewBox="0 0 448 512"><path fill="currentColor" d="M136.7 5.9L128 32 32 32C14.3 32 0 46.3 0 64S14.3 96 32 96l384 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-96 0-8.7-26.1C306.9-7.2 294.7-16 280.9-16L167.1-16c-13.8 0-26 8.8-30.4 21.9zM416 144L32 144 53.1 467.1C54.7 492.4 75.7 512 101 512L347 512c25.3 0 46.3-19.6 47.9-44.9L416 144z"/></svg>';
 const ICON_GRIP = '<svg viewBox="0 0 16 16" width="14" height="14"><circle cx="5" cy="3" r="1.3" fill="currentColor"/><circle cx="11" cy="3" r="1.3" fill="currentColor"/><circle cx="5" cy="8" r="1.3" fill="currentColor"/><circle cx="11" cy="8" r="1.3" fill="currentColor"/><circle cx="5" cy="13" r="1.3" fill="currentColor"/><circle cx="11" cy="13" r="1.3" fill="currentColor"/></svg>';
+const ICON_CHECK = '<svg viewBox="0 0 512 512"><path fill="currentColor" d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM369 209L241 337c-9.4 9.4-24.6 9.4-33.9 0l-64-64c-9.4-9.4-9.4-24.6 0-33.9s24.6-9.4 33.9 0l47 47L335 175c9.4-9.4 24.6-9.4 33.9 0s9.4 24.6 0 33.9z"/></svg>';
 
 function daysAgo(dateStr){
   if(!dateStr) return null;
   const d = new Date(dateStr);
   const now = new Date();
   return Math.floor((now - d) / (1000*60*60*24));
+}
+
+const DOW = {Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6};
+
+// Most recent date (today or earlier) that falls on the given weekday.
+function mostRecentDateForDay(dayAbbrev, base){
+  base = base || new Date();
+  const diff = (base.getDay() - DOW[dayAbbrev] + 7) % 7;
+  const d = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+  d.setDate(d.getDate() - diff);
+  return d;
+}
+
+function toDateInputValue(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+
+function defaultMarkMadeDate(day){
+  return toDateInputValue(mostRecentDateForDay(day));
 }
 
 function renderMeals(){
@@ -792,9 +835,14 @@ function renderWeek(){
     const isOpen = openDropdownDay === d;
     const query = (daySearch[d]||'').trim().toLowerCase();
     const visibleMeals = query ? meals.filter(m=>m.name.toLowerCase().includes(query)) : meals;
+    const markMadeOpen = openMarkMadeDay === d && selectedMeals.length>0;
+    const markMadeDate = markMadeDateOverride[d] || defaultMarkMadeDate(d);
     return `
       <div class="day-block">
-        <div class="day-heading">${d}</div>
+        <div class="day-heading-row">
+          <div class="day-heading">${d}</div>
+          ${selectedMeals.length>0 ? `<button class="icon-only-btn mark-made-btn" onclick="toggleMarkMadeDay(event,'${d}')" title="Mark all of ${d}'s meals made">${ICON_CHECK}</button>` : ''}
+        </div>
         <div class="multiselect">
           <div class="multiselect-control" onclick="toggleDropdown('${d}')">
             ${selectedMeals.length===0
@@ -826,6 +874,16 @@ function renderWeek(){
             </div>
           ` : ''}
         </div>
+        ${markMadeOpen ? `
+          <div class="day-picker mark-made-panel">
+            <div class="mark-made-panel-label">Mark ${selectedMeals.map(m=>escapeHtml(m.name)).join(', ')} made on:</div>
+            <input type="date" value="${markMadeDate}" onclick="event.stopPropagation()" oninput="setMarkMadeDate('${d}', this.value)">
+            <div class="row" style="justify-content:flex-end;gap:8px;">
+              <button class="link-btn" onclick="cancelMarkMadeDay(event)">Cancel</button>
+              <button class="btn-primary" onclick="confirmMarkMade(event,'${d}')">Mark all made</button>
+            </div>
+          </div>
+        ` : ''}
       </div>
     `;
   }).join('');
@@ -885,6 +943,40 @@ window.clearDay = async function(event, day){
   renderWeek();
 }
 
+window.toggleMarkMadeDay = function(event, day){
+  event.stopPropagation();
+  openMarkMadeDay = (openMarkMadeDay===day) ? null : day;
+  renderWeek();
+}
+
+window.setMarkMadeDate = function(day, value){
+  markMadeDateOverride[day] = value;
+}
+
+window.cancelMarkMadeDay = function(event){
+  event.stopPropagation();
+  openMarkMadeDay = null;
+  renderWeek();
+}
+
+window.confirmMarkMade = async function(event, day){
+  event.stopPropagation();
+  const dateVal = markMadeDateOverride[day] || defaultMarkMadeDate(day);
+  const lastMade = new Date(dateVal+'T00:00:00').toISOString();
+  (week[day]||[]).forEach(id=>{
+    const m = meals.find(x=>x.id===id);
+    if(m) m.lastMade = lastMade;
+  });
+  delete week[day];
+  delete markMadeDateOverride[day];
+  openMarkMadeDay = null;
+  await saveMeals();
+  await saveWeek();
+  renderWeek();
+  renderMeals();
+  renderShop();
+}
+
 document.addEventListener('click', (e)=>{
   if(openDropdownDay && !e.target.closest('.multiselect')){
     openDropdownDay = null;
@@ -897,6 +989,10 @@ document.addEventListener('click', (e)=>{
   if(confirmDeleteId && !e.target.closest('.card')){
     confirmDeleteId = null;
     renderMeals();
+  }
+  if(openMarkMadeDay && !e.target.closest('.mark-made-panel') && !e.target.closest('.mark-made-btn')){
+    openMarkMadeDay = null;
+    renderWeek();
   }
 });
 
