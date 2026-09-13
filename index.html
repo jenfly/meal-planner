@@ -385,6 +385,26 @@
     padding:8px;
     border-bottom:1px solid var(--line);
   }
+  .multiselect-search-row{
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .multiselect-search-row input.multiselect-search{
+    flex:1;
+    min-width:0;
+  }
+  select.multiselect-sort{
+    width:auto;
+    flex:none;
+    margin:0;
+    padding:6px 7px;
+    font-size:13px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    background:#fff;
+    color:var(--ink-soft);
+  }
   input.multiselect-search{
     width:100%;
     margin:0;
@@ -643,6 +663,7 @@ let batchChecked = {};
 let rotateToToday = localStorage.getItem('mealRotation.rotateToToday') !== 'false';
 let editingId = null;
 let mealSort = localStorage.getItem('mealRotation.mealSort') || 'due';
+let weekMealSort = localStorage.getItem('mealRotation.weekMealSort') || 'name';
 let mealSearchQuery = '';
 let mealCategoryFilter = [];
 let openMealDayPicker = null;
@@ -1045,6 +1066,23 @@ function renderMealsFilterBar(){
   });
 }
 
+function sortMealsBy(list, sortKey){
+  return [...list].sort((a,b)=>{
+    if(sortKey==='name'){
+      return a.name.localeCompare(b.name);
+    }
+    if(sortKey==='added'){
+      const ca = a.createdAt ? new Date(a.createdAt) : new Date(0);
+      const cb = b.createdAt ? new Date(b.createdAt) : new Date(0);
+      return cb - ca;
+    }
+    const da = a.lastMade ? new Date(a.lastMade) : new Date(0);
+    const db = b.lastMade ? new Date(b.lastMade) : new Date(0);
+    if(sortKey==='recent') return db - da;
+    return da - db; // 'due' (default): oldest / never made first
+  });
+}
+
 function renderMeals(){
   const list = document.getElementById('meals-list');
   const sortRow = document.getElementById('sort-row');
@@ -1063,20 +1101,7 @@ function renderMeals(){
     list.innerHTML = '<div class="empty">No meals match your search or filter.</div>';
     return;
   }
-  const sorted = [...filteredMeals].sort((a,b)=>{
-    if(mealSort==='name'){
-      return a.name.localeCompare(b.name);
-    }
-    if(mealSort==='added'){
-      const ca = a.createdAt ? new Date(a.createdAt) : new Date(0);
-      const cb = b.createdAt ? new Date(b.createdAt) : new Date(0);
-      return cb - ca;
-    }
-    const da = a.lastMade ? new Date(a.lastMade) : new Date(0);
-    const db = b.lastMade ? new Date(b.lastMade) : new Date(0);
-    if(mealSort==='recent') return db - da;
-    return da - db; // 'due' (default): oldest / never made first
-  });
+  const sorted = sortMealsBy(filteredMeals, mealSort);
   list.innerHTML = sorted.map(m=>{
     const ago = daysAgo(m.lastMade);
     let metaText, metaClass = '';
@@ -1285,7 +1310,8 @@ function renderWeek(){
     const selectedMeals = selectedIds.map(id=>meals.find(m=>m.id===id)).filter(Boolean);
     const isOpen = openDropdownDay === d;
     const query = (daySearch[d]||'').trim().toLowerCase();
-    const visibleMeals = query ? meals.filter(m=>m.name.toLowerCase().includes(query)) : meals;
+    const matchingMeals = query ? meals.filter(m=>m.name.toLowerCase().includes(query)) : meals;
+    const visibleMeals = sortMealsBy(matchingMeals, weekMealSort);
     const markMadeOpen = openMarkMadeDay === d && selectedMeals.length>0;
     const markMadeDate = markMadeDateOverride[d] || defaultMarkMadeDate(d);
     const isToday = d === today;
@@ -1312,8 +1338,16 @@ function renderWeek(){
           ${isOpen ? `
             <div class="multiselect-panel">
               <div class="multiselect-search-wrap">
-                <input type="text" class="multiselect-search" data-day="${d}" placeholder="Search meals"
-                  value="${escapeHtml(daySearch[d]||'')}" oninput="setDaySearch('${d}', this.value)">
+                <div class="multiselect-search-row">
+                  <input type="text" class="multiselect-search" data-day="${d}" placeholder="Search meals"
+                    value="${escapeHtml(daySearch[d]||'')}" oninput="setDaySearch('${d}', this.value)">
+                  <select class="multiselect-sort" title="Sort meals in this list" onchange="setWeekMealSort(this.value)">
+                    <option value="name" ${weekMealSort==='name'?'selected':''}>Name</option>
+                    <option value="due" ${weekMealSort==='due'?'selected':''}>Due (oldest first)</option>
+                    <option value="recent" ${weekMealSort==='recent'?'selected':''}>Recently made</option>
+                    <option value="added" ${weekMealSort==='added'?'selected':''}>Date added</option>
+                  </select>
+                </div>
               </div>
               ${visibleMeals.length===0
                 ? '<div class="multiselect-no-match">No meals match.</div>'
@@ -1583,6 +1617,12 @@ window.toggleDropdown = function(day){
 
 window.setDaySearch = function(day, value){
   daySearch[day] = value;
+  renderWeek();
+}
+
+window.setWeekMealSort = function(value){
+  weekMealSort = value;
+  localStorage.setItem('mealRotation.weekMealSort', weekMealSort);
   renderWeek();
 }
 
