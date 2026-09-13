@@ -287,6 +287,20 @@
     border-radius:999px;
     padding:4px 8px 4px 12px;
     line-height:1.3;
+    cursor:grab;
+    touch-action:none;
+    -webkit-user-select:none;
+    user-select:none;
+  }
+  .multiselect-selected-item:active{cursor:grabbing;}
+  .multiselect-selected-item.dragging{
+    position:relative;
+    z-index:50;
+    cursor:grabbing;
+    box-shadow:0 6px 16px rgba(0,0,0,0.14);
+  }
+  .multiselect-selected-item.shift-anim{
+    transition:transform 150ms ease;
   }
   .multiselect-pill-remove{
     display:inline-flex;
@@ -877,13 +891,13 @@ function renderWeek(){
           ${selectedMeals.length>0 ? `<button class="icon-only-btn mark-made-btn" onclick="toggleMarkMadeDay(event,'${d}')" title="Mark all of ${d}'s meals made">${ICON_CHECK}</button>` : ''}
         </div>
         <div class="multiselect">
-          <div class="multiselect-control" onclick="toggleDropdown('${d}')">
+          <div class="multiselect-control" data-day="${d}" onclick="toggleDropdown('${d}')">
             ${selectedMeals.length===0
               ? '<span class="multiselect-placeholder">— not planned —</span>'
               : selectedMeals.map(m=>{
                   const c = weekColors[m.id];
                   return `
-                  <span class="multiselect-selected-item" style="background:${c.bg};color:${c.fg};">
+                  <span class="multiselect-selected-item" data-meal-id="${m.id}" style="background:${c.bg};color:${c.fg};">
                     ${escapeHtml(m.name)}
                     <span class="multiselect-pill-remove" style="color:${c.fg};" onclick="removeMealFromDay(event,'${d}','${m.id}')">✕</span>
                   </span>
@@ -928,6 +942,128 @@ function renderWeek(){
       inp.setSelectionRange(v.length, v.length);
     }
   }
+  attachWeekPillDragHandlers(card);
+}
+
+function attachWeekPillDragHandlers(card){
+  card.querySelectorAll('.multiselect-selected-item').forEach(pillEl=>{
+    pillEl.onpointerdown = (e)=>{
+      if(e.target.closest('.multiselect-pill-remove')) return;
+      beginPillDrag(e, pillEl);
+    };
+  });
+}
+
+// Same FLIP-based vertical reorder approach as the shopping list drag (see
+// beginShopDrag), but a plain click on a pill still needs to open the day's
+// dropdown, so dragging only kicks in once the pointer clears a small
+// movement threshold — below that, the click passes through untouched.
+function beginPillDrag(e, pillEl){
+  const container = pillEl.closest('.multiselect-control');
+  const day = container.dataset.day;
+  const startX = e.clientX, startY = e.clientY;
+  const pointerId = e.pointerId;
+  const THRESHOLD = 6;
+  let dragging = false;
+  let siblings, rects, draggedIndex, draggedHeight, afterEl, latestOrder;
+
+  function startDragNow(){
+    dragging = true;
+    siblings = Array.from(container.querySelectorAll('.multiselect-selected-item'));
+    draggedIndex = siblings.indexOf(pillEl);
+    rects = new Map(siblings.map(el=>[el, el.getBoundingClientRect()]));
+    draggedHeight = rects.get(pillEl).height;
+    afterEl = siblings[siblings.length-1].nextElementSibling;
+    latestOrder = siblings.slice();
+    pillEl.classList.add('dragging');
+    siblings.forEach(el=>{ if(el!==pillEl) el.classList.add('shift-anim'); });
+    try{ pillEl.setPointerCapture(pointerId); }catch(err){}
+  }
+
+  function onMove(ev){
+    const dy = ev.clientY - startY;
+    if(!dragging){
+      const dx = ev.clientX - startX;
+      if(Math.abs(dy) < THRESHOLD && Math.abs(dx) < THRESHOLD) return;
+      startDragNow();
+    }
+    pillEl.style.transform = `translateY(${dy}px)`;
+    const draggedCenter = rects.get(pillEl).top + dy + draggedHeight/2;
+
+    const aboveStay = [], aboveMoved = [], belowMoved = [], belowStay = [];
+    siblings.forEach((sib, idx)=>{
+      if(sib===pillEl) return;
+      const r = rects.get(sib);
+      const sibCenter = r.top + r.height/2;
+      if(idx < draggedIndex){
+        const displaced = draggedCenter < sibCenter;
+        sib.style.transform = displaced ? `translateY(${draggedHeight}px)` : '';
+        (displaced ? aboveMoved : aboveStay).push(sib);
+      } else {
+        const displaced = draggedCenter > sibCenter;
+        sib.style.transform = displaced ? `translateY(${-draggedHeight}px)` : '';
+        (displaced ? belowMoved : belowStay).push(sib);
+      }
+    });
+    latestOrder = [...aboveStay, ...belowMoved, pillEl, ...aboveMoved, ...belowStay];
+  }
+
+  function suppressClick(ev){
+    ev.stopPropagation();
+    ev.preventDefault();
+  }
+
+  function onUp(ev){
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    if(!dragging) return;
+    try{ pillEl.releasePointerCapture(pointerId); }catch(err){}
+    document.addEventListener('click', suppressClick, { capture:true, once:true });
+
+    const beforeRects = new Map(siblings.map(el=>[el, el.getBoundingClientRect()]));
+
+    latestOrder.forEach(el=> container.insertBefore(el, afterEl));
+
+    siblings.forEach(el=>{
+      el.classList.remove('shift-anim');
+      el.style.transition = 'none';
+      el.style.transform = '';
+    });
+
+    siblings.forEach(el=>{
+      const before = beforeRects.get(el);
+      const after = el.getBoundingClientRect();
+      const dy = before.top - after.top;
+      if(Math.abs(dy) > 0.5) el.style.transform = `translateY(${dy}px)`;
+    });
+    void container.offsetHeight;
+
+    requestAnimationFrame(()=>{
+      siblings.forEach(el=>{
+        el.style.transition = '';
+        el.classList.add('shift-anim');
+        el.style.transform = '';
+      });
+      setTimeout(()=>{
+        siblings.forEach(el=>{
+          el.classList.remove('shift-anim');
+          el.style.transition = '';
+        });
+        pillEl.classList.remove('dragging');
+      }, 170);
+    });
+
+    finalizePillOrder(day, container);
+  }
+
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+}
+
+async function finalizePillOrder(day, container){
+  const ids = Array.from(container.querySelectorAll('.multiselect-selected-item')).map(el=>el.dataset.mealId);
+  week[day] = ids;
+  await saveWeek();
 }
 
 window.toggleDropdown = function(day){
