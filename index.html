@@ -563,6 +563,21 @@ let confirmDeleteId = null;
 let openMarkMadeDay = null;
 let markMadeDateOverride = {};
 
+// Category picker state. Only one meal form (the add form, or one meal's
+// edit form) is ever open at a time, so a single set of globals — keyed by
+// 'new' or the meal id being edited — is enough; no per-form map needed.
+let categoryFormKey = null;
+let categoryFormSelected = [];
+let categoryPickerOpen = false;
+let categoryPickerSearch = '';
+
+function resetCategoryFormState(){
+  categoryFormKey = null;
+  categoryFormSelected = [];
+  categoryPickerOpen = false;
+  categoryPickerSearch = '';
+}
+
 const MEAL_COLORS = [
   { bg:'#E7EEE1', fg:'#3E5236' }, // sage
   { bg:'#F5E1D8', fg:'#B9583A' }, // clay
@@ -577,6 +592,152 @@ const MEAL_COLORS = [
   { bg:'#F7E3ED', fg:'#A13F72' }, // rose
   { bg:'#E6EAEC', fg:'#4C6270' }, // slate
 ];
+
+// Category pills use a subset of the same palette (minus sage/mustard, which
+// are reserved for the freshness status pill) so they read as clearly
+// distinct. Color is picked by hashing the category text itself rather than
+// assignment order, so a given category is always the same color everywhere
+// it appears, with no assignment state to persist.
+const CATEGORY_COLORS = MEAL_COLORS.filter((_,i)=> i!==0 && i!==2);
+function hashStr(s){
+  let h = 0;
+  for(let i=0;i<s.length;i++){ h = (h*31 + s.charCodeAt(i)) >>> 0; }
+  return h;
+}
+function categoryColor(cat){
+  return CATEGORY_COLORS[hashStr(cat.trim().toLowerCase()) % CATEGORY_COLORS.length];
+}
+
+// Distinct categories already used by any saved meal, deduped case-insensitively
+// (first-seen casing wins), sorted alphabetically for the picker.
+function allCategories(){
+  const seen = new Map();
+  meals.forEach(m=>(m.categories||[]).forEach(c=>{
+    const key = c.trim().toLowerCase();
+    if(key && !seen.has(key)) seen.set(key, c.trim());
+  }));
+  return Array.from(seen.values()).sort((a,b)=>a.localeCompare(b));
+}
+
+function escapeAttr(s){
+  return escapeHtml(s).replace(/"/g,'&quot;');
+}
+
+function categoryFieldWrapperHtml(formKey){
+  return `<div id="cat-field-${formKey}">${categoryFieldInnerHtml(formKey)}</div>`;
+}
+
+function categoryFieldInnerHtml(formKey){
+  const isOpen = categoryPickerOpen && categoryFormKey===formKey;
+  const query = categoryPickerSearch.trim();
+  const queryLower = query.toLowerCase();
+  const selectedLower = categoryFormSelected.map(c=>c.toLowerCase());
+  const options = allCategories().filter(c=>!selectedLower.includes(c.toLowerCase()));
+  const visible = queryLower ? options.filter(c=>c.toLowerCase().includes(queryLower)) : options;
+  const exactExists = queryLower!=='' && (options.some(c=>c.toLowerCase()===queryLower) || selectedLower.includes(queryLower));
+  return `
+    <label class="field-label">Categories (optional)</label>
+    <div class="multiselect category-picker" data-form-key="${escapeAttr(formKey)}">
+      <div class="multiselect-control" data-role="category-toggle">
+        ${categoryFormSelected.length===0
+          ? '<span class="multiselect-placeholder">Select or add categories</span>'
+          : categoryFormSelected.map(c=>{
+              const col = categoryColor(c);
+              return `<span class="multiselect-selected-item" style="background:${col.bg};color:${col.fg};cursor:default;touch-action:auto;" data-category="${escapeAttr(c)}">
+                ${escapeHtml(c)}
+                <span class="multiselect-pill-remove" style="color:${col.fg};" data-role="category-remove" data-category="${escapeAttr(c)}">✕</span>
+              </span>`;
+            }).join('')}
+      </div>
+      ${isOpen ? `
+        <div class="multiselect-panel">
+          <div class="multiselect-search-wrap">
+            <input type="text" class="multiselect-search" data-role="category-search" placeholder="Search or add a category" value="${escapeAttr(categoryPickerSearch)}">
+          </div>
+          ${options.length===0
+            ? (query ? '' : `<div class="multiselect-no-match">${allCategories().length===0 ? 'No categories yet — type below to add one.' : 'All existing categories are already added.'}</div>`)
+            : (visible.length===0
+              ? '<div class="multiselect-no-match">No matches.</div>'
+              : visible.map(c=>`
+                <label class="multiselect-option">
+                  <input type="checkbox" data-role="category-add" data-category="${escapeAttr(c)}">
+                  <span>${escapeHtml(c)}</span>
+                </label>
+              `).join(''))}
+          ${query && !exactExists ? `
+            <div class="multiselect-option" data-role="category-add-new" style="cursor:pointer;color:var(--sage-deep);font-weight:600;">
+              + Add "${escapeHtml(query)}"
+            </div>
+          ` : ''}
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function renderCategoryField(formKey){
+  const el = document.getElementById('cat-field-'+formKey);
+  if(!el) return;
+  el.innerHTML = categoryFieldInnerHtml(formKey);
+  attachCategoryPickerHandlers(el);
+}
+
+function addTypedCategory(formKey){
+  const val = categoryPickerSearch.trim();
+  if(!val) return;
+  if(!categoryFormSelected.some(c=>c.toLowerCase()===val.toLowerCase())) categoryFormSelected.push(val);
+  categoryPickerSearch = '';
+  renderCategoryField(formKey);
+}
+
+function attachCategoryPickerHandlers(root){
+  const wrap = root.querySelector('.category-picker');
+  if(!wrap) return;
+  const formKey = wrap.dataset.formKey;
+  wrap.querySelector('[data-role="category-toggle"]').addEventListener('click', (e)=>{
+    e.stopPropagation();
+    const willOpen = !(categoryPickerOpen && categoryFormKey===formKey);
+    categoryPickerOpen = willOpen;
+    categoryFormKey = formKey;
+    categoryPickerSearch = '';
+    renderCategoryField(formKey);
+  });
+  wrap.querySelectorAll('[data-role="category-remove"]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const cat = btn.dataset.category;
+      categoryFormSelected = categoryFormSelected.filter(c=>c!==cat);
+      renderCategoryField(formKey);
+    });
+  });
+  const searchInput = wrap.querySelector('[data-role="category-search"]');
+  if(searchInput){
+    searchInput.addEventListener('click', e=>e.stopPropagation());
+    searchInput.addEventListener('input', (e)=>{
+      categoryPickerSearch = e.target.value;
+      renderCategoryField(formKey);
+    });
+    searchInput.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter'){
+        e.preventDefault();
+        addTypedCategory(formKey);
+      }
+    });
+    searchInput.focus();
+    const v = searchInput.value;
+    searchInput.setSelectionRange(v.length, v.length);
+  }
+  wrap.querySelectorAll('[data-role="category-add"]').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      const cat = cb.dataset.category;
+      if(!categoryFormSelected.some(c=>c.toLowerCase()===cat.toLowerCase())) categoryFormSelected.push(cat);
+      categoryPickerSearch = '';
+      renderCategoryField(formKey);
+    });
+  });
+  const addNew = wrap.querySelector('[data-role="category-add-new"]');
+  if(addNew) addNew.addEventListener('click', ()=> addTypedCategory(formKey));
+}
 
 // Each meal keeps the same color for as long as the page stays open, once
 // assigned — otherwise moving or removing one meal shifts everyone else's
@@ -727,6 +888,10 @@ function renderMeals(){
       <div class="meal-title-row">
         <span class="meal-name">${escapeHtml(m.name)}</span>
         <span class="pill ${metaClass}">${metaText}</span>
+        ${(m.categories||[]).map(c=>{
+          const col = categoryColor(c);
+          return `<span class="pill" style="background:${col.bg};color:${col.fg};">${escapeHtml(c)}</span>`;
+        }).join('')}
       </div>
       ${m.parts ? `<div class="meal-parts">${escapeHtml(m.parts)}</div>` : ''}
       ${assignedDays.length>0 ? `<div class="meal-parts">This week: ${assignedDays.join(', ')}</div>` : ''}
@@ -759,6 +924,7 @@ function renderMeals(){
       ` : ''}
     </div>`;
   }).join('');
+  if(editingId) attachCategoryPickerHandlers(list);
 }
 
 function mealEditFormHtml(m){
@@ -770,6 +936,7 @@ function mealEditFormHtml(m){
       <input type="text" id="f-parts-${m.id}" value="${escapeHtml(m.parts||'')}">
       <label class="field-label">Items to have on hand (comma separated)</label>
       <textarea id="f-items-${m.id}" rows="2">${escapeHtml((m.items||[]).join(', '))}</textarea>
+      ${categoryFieldWrapperHtml(m.id)}
       <div class="row" style="justify-content:flex-end;gap:8px;">
         <button class="link-btn" onclick="cancelMealEdit()">Cancel</button>
         <button class="btn-primary" onclick="saveMealEdit('${m.id}')">Save changes</button>
@@ -793,6 +960,7 @@ window.askDeleteMeal = function(id){
   confirmDeleteId = id;
   openMealDayPicker = null;
   editingId = null;
+  resetCategoryFormState();
   renderMeals();
 }
 
@@ -809,7 +977,7 @@ window.deleteMeal = async function(id){
   });
   if(openMealDayPicker===id) openMealDayPicker = null;
   if(confirmDeleteId===id) confirmDeleteId = null;
-  if(editingId===id) editingId = null;
+  if(editingId===id){ editingId = null; resetCategoryFormState(); }
   await saveMeals();
   await saveWeek();
   renderMeals();
@@ -820,12 +988,18 @@ window.editMeal = function(id){
   editingId = id;
   confirmDeleteId = null;
   openMealDayPicker = null;
+  const m = meals.find(x=>x.id===id);
+  categoryFormKey = id;
+  categoryFormSelected = m ? [...(m.categories||[])] : [];
+  categoryPickerOpen = false;
+  categoryPickerSearch = '';
   document.getElementById('add-form-wrap').innerHTML = '';
   renderMeals();
 }
 
 window.cancelMealEdit = function(){
   editingId = null;
+  resetCategoryFormState();
   renderMeals();
 }
 
@@ -838,15 +1012,21 @@ window.saveMealEdit = async function(id){
   }
   const parts = document.getElementById('f-parts-'+id).value.trim();
   const items = document.getElementById('f-items-'+id).value.split(',').map(s=>s.trim()).filter(Boolean);
+  const categories = categoryFormSelected.slice();
   const existing = meals.find(x=>x.id===id);
-  existing.name = name; existing.parts = parts; existing.items = items;
+  existing.name = name; existing.parts = parts; existing.items = items; existing.categories = categories;
   await saveMeals();
   editingId = null;
+  resetCategoryFormState();
   renderMeals();
 }
 
 document.getElementById('show-add-form').addEventListener('click', ()=>{
   editingId = null;
+  categoryFormKey = 'new';
+  categoryFormSelected = [];
+  categoryPickerOpen = false;
+  categoryPickerSearch = '';
   showForm();
 });
 
@@ -860,13 +1040,15 @@ function showForm(){
       <input type="text" id="f-parts">
       <label class="field-label">Items to have on hand (comma separated)</label>
       <textarea id="f-items" rows="2"></textarea>
+      ${categoryFieldWrapperHtml('new')}
       <div class="row" style="justify-content:flex-end;gap:8px;">
         <button class="link-btn" id="f-cancel">Cancel</button>
         <button class="btn-primary" id="f-save">Save meal</button>
       </div>
     </div>
   `;
-  document.getElementById('f-cancel').addEventListener('click', ()=>{ wrap.innerHTML=''; });
+  attachCategoryPickerHandlers(wrap);
+  document.getElementById('f-cancel').addEventListener('click', ()=>{ wrap.innerHTML=''; resetCategoryFormState(); });
   document.getElementById('f-save').addEventListener('click', async ()=>{
     const name = document.getElementById('f-name').value.trim();
     const errBox = document.getElementById('f-name');
@@ -876,9 +1058,11 @@ function showForm(){
     }
     const parts = document.getElementById('f-parts').value.trim();
     const items = document.getElementById('f-items').value.split(',').map(s=>s.trim()).filter(Boolean);
-    meals.push({ id: uid(), name, parts, items, lastMade: null, createdAt: new Date().toISOString() });
+    const categories = categoryFormSelected.slice();
+    meals.push({ id: uid(), name, parts, items, categories, lastMade: null, createdAt: new Date().toISOString() });
     await saveMeals();
     wrap.innerHTML = '';
+    resetCategoryFormState();
     renderMeals();
   });
 }
@@ -1280,6 +1464,10 @@ document.addEventListener('click', (e)=>{
   if(openMarkMadeDay && !e.target.closest('.mark-made-panel') && !e.target.closest('.mark-made-btn')){
     openMarkMadeDay = null;
     renderWeek();
+  }
+  if(categoryPickerOpen && !e.target.closest('.category-picker')){
+    categoryPickerOpen = false;
+    renderCategoryField(categoryFormKey);
   }
 });
 
