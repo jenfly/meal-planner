@@ -615,17 +615,40 @@ const MEAL_COLORS = [
 
 // Category pills use a subset of the same palette (minus sage/mustard, which
 // are reserved for the freshness status pill) so they read as clearly
-// distinct. Color is picked by hashing the category text itself rather than
-// assignment order, so a given category is always the same color everywhere
-// it appears, with no assignment state to persist.
+// distinct. Color is picked by hashing the category text, then nudged to the
+// next free slot if that collides with another category currently in use, so
+// two categories never look the same as long as there's a free color left.
+// Nothing is persisted: the whole assignment is recomputed from `meals` each
+// time, so a category's color can shift if categories are added/removed, but
+// is otherwise stable.
 const CATEGORY_COLORS = MEAL_COLORS.filter((_,i)=> i!==0 && i!==2);
 function hashStr(s){
   let h = 0;
   for(let i=0;i<s.length;i++){ h = (h*31 + s.charCodeAt(i)) >>> 0; }
   return h;
 }
+function categoryColorAssignments(cats){
+  const used = new Set();
+  const map = new Map();
+  cats.forEach(cat=>{
+    const key = cat.trim().toLowerCase();
+    if(map.has(key)) return;
+    let idx = hashStr(key) % CATEGORY_COLORS.length;
+    let tries = 0;
+    while(used.has(idx) && tries < CATEGORY_COLORS.length){
+      idx = (idx + 1) % CATEGORY_COLORS.length;
+      tries++;
+    }
+    used.add(idx);
+    map.set(key, CATEGORY_COLORS[idx]);
+  });
+  return map;
+}
 function categoryColor(cat){
-  return CATEGORY_COLORS[hashStr(cat.trim().toLowerCase()) % CATEGORY_COLORS.length];
+  const key = cat.trim().toLowerCase();
+  const cats = allCategories();
+  if(!cats.some(c=>c.toLowerCase()===key)) cats.push(cat);
+  return categoryColorAssignments(cats).get(key);
 }
 
 // Distinct categories already used by any saved meal, deduped case-insensitively
