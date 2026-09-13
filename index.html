@@ -578,19 +578,21 @@ const MEAL_COLORS = [
   { bg:'#E6EAEC', fg:'#4C6270' }, // slate
 ];
 
-// Colors are assigned by order of first appearance among meals currently
-// selected somewhere in the week, so pills stay consistent with each other
-// while the week is populated but can shift once everything is cleared and
-// re-picked later.
+// Each meal keeps the same color for as long as the page stays open, once
+// assigned — otherwise moving or removing one meal shifts everyone else's
+// "first appearance" order and cascades into their pills changing color too
+// (most noticeable while dragging a pill to a different day).
+let mealColorAssignments = {};
+let nextMealColorIndex = 0;
 function assignWeekMealColors(){
   const colorMap = {};
-  let next = 0;
   DAYS.forEach(d=>{
     (week[d]||[]).forEach(id=>{
-      if(!(id in colorMap)){
-        colorMap[id] = MEAL_COLORS[next % MEAL_COLORS.length];
-        next++;
+      if(!(id in mealColorAssignments)){
+        mealColorAssignments[id] = nextMealColorIndex % MEAL_COLORS.length;
+        nextMealColorIndex++;
       }
+      colorMap[id] = MEAL_COLORS[mealColorAssignments[id]];
     });
   });
   return colorMap;
