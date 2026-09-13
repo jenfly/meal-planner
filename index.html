@@ -1284,6 +1284,7 @@ async function findBackupFileId(token){
   const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`, {
     headers: { Authorization: 'Bearer ' + token }
   });
+  if(!res.ok) throw new Error('find-failed');
   const data = await res.json();
   return (data.files && data.files[0]) ? data.files[0].id : null;
 }
@@ -1322,11 +1323,12 @@ function mergeMeals(local, incoming){
 async function uploadBackup(token, jsonContent){
   const fileId = await findBackupFileId(token);
   if(fileId){
-    await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+    const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
       method: 'PATCH',
       headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: jsonContent
     });
+    if(!res.ok) throw new Error('upload-failed');
   } else {
     const boundary = 'mealrotationbackup';
     const metadata = { name: BACKUP_FILENAME, mimeType: 'application/json' };
@@ -1334,11 +1336,12 @@ async function uploadBackup(token, jsonContent){
       `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
       `--${boundary}\r\nContent-Type: application/json\r\n\r\n${jsonContent}\r\n` +
       `--${boundary}--`;
-    await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + token, 'Content-Type': `multipart/related; boundary=${boundary}` },
       body
     });
+    if(!res.ok) throw new Error('upload-failed');
   }
 }
 
