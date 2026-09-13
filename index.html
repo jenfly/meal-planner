@@ -1288,6 +1288,37 @@ async function findBackupFileId(token){
   return (data.files && data.files[0]) ? data.files[0].id : null;
 }
 
+async function downloadBackup(token, fileId){
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: { Authorization: 'Bearer ' + token }
+  });
+  if(!res.ok) throw new Error('download-failed');
+  return res.text();
+}
+
+// Merges backup meals into local meals by id: new ids are added, and for ids
+// present in both, whichever copy has the more recent lastMade wins (so
+// restoring doesn't clobber a meal that's been made more recently on this device).
+function mergeMeals(local, incoming){
+  const byId = new Map(local.map(m=>[m.id, m]));
+  let added = 0, updated = 0;
+  incoming.forEach(bm=>{
+    const lm = byId.get(bm.id);
+    if(!lm){
+      byId.set(bm.id, bm);
+      added++;
+    } else {
+      const bmTime = bm.lastMade ? new Date(bm.lastMade).getTime() : 0;
+      const lmTime = lm.lastMade ? new Date(lm.lastMade).getTime() : 0;
+      if(bmTime > lmTime){
+        byId.set(bm.id, bm);
+        updated++;
+      }
+    }
+  });
+  return { merged: Array.from(byId.values()), added, updated };
+}
+
 async function uploadBackup(token, jsonContent){
   const fileId = await findBackupFileId(token);
   if(fileId){
@@ -1347,6 +1378,44 @@ window.doBackup = async function(){
   }
 }
 
+window.doRestore = async function(){
+  renderBackupMenu('Connecting to Google…');
+  try{
+    if(GOOGLE_CLIENT_ID.indexOf('YOUR_CLIENT_ID') === 0){
+      renderBackupMenu('Not set up yet — add a Google client ID in the code first.');
+      showToast('Backup not set up yet — add a Google client ID in the code first.', 'error');
+      return;
+    }
+    await loadGis();
+    const token = await getAccessToken();
+    renderBackupMenu('Restoring…');
+    const fileId = await findBackupFileId(token);
+    if(!fileId){
+      renderBackupMenu('No backup found on Google Drive.');
+      showToast('No backup found on Google Drive.', 'error');
+      return;
+    }
+    const content = await downloadBackup(token, fileId);
+    const data = JSON.parse(content);
+    if(!Array.isArray(data.meals)) throw new Error('invalid-backup');
+    const { merged, added, updated } = mergeMeals(meals, data.meals);
+    meals = merged;
+    await saveMeals();
+    renderMeals();
+    renderWeek();
+    renderShop();
+    renderBackupMenu('Restored just now.');
+    if(added || updated){
+      showToast(`Restored from Google Drive: ${added} added, ${updated} updated.`, 'success');
+    } else {
+      showToast('Restored from Google Drive — already up to date.', 'success');
+    }
+  }catch(err){
+    renderBackupMenu('Restore failed — try again.');
+    showToast('Restore from Google Drive failed — try again.', 'error');
+  }
+}
+
 function renderBackupMenu(statusOverride){
   const el = document.getElementById('backup-menu-content');
   if(!el) return;
@@ -1361,6 +1430,7 @@ function renderBackupMenu(statusOverride){
     <div style="font-size:13px;color:var(--ink-soft);margin-bottom:10px;">Back up your meals to Google Drive.</div>
     <span class="pill ${due?'stale':''}" style="margin-bottom:10px;display:inline-block;">${pillText}</span>
     <button class="btn-primary" style="width:100%;" onclick="doBackup()">Back up now</button>
+    <button class="btn-ghost" style="margin-top:8px;" onclick="doRestore()">Restore from backup</button>
     ${statusOverride ? `<div style="font-size:12px;color:var(--ink-faint);margin-top:8px;">${statusOverride}</div>` : ''}
   `;
 }
