@@ -435,9 +435,42 @@
     background:none;border:none;color:var(--ink-faint);font-size:13px;
     cursor:pointer;text-decoration:underline;padding:0;
   }
+  .toast-container{
+    position:fixed;
+    left:50%;
+    bottom:22px;
+    transform:translateX(-50%);
+    z-index:100;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:8px;
+    width:calc(100% - 32px);
+    max-width:420px;
+    pointer-events:none;
+  }
+  .toast{
+    width:100%;
+    box-sizing:border-box;
+    padding:11px 16px;
+    border-radius:10px;
+    font-size:14px;
+    box-shadow:0 6px 18px rgba(0,0,0,0.18);
+    background:var(--card);
+    border:1px solid var(--line);
+    color:var(--ink);
+    opacity:0;
+    transform:translateY(8px);
+    transition:opacity 200ms ease, transform 200ms ease;
+  }
+  .toast.show{opacity:1;transform:translateY(0);}
+  .toast.success{background:var(--sage-wash);border-color:var(--sage);color:var(--sage-deep);}
+  .toast.error{background:var(--clay-wash);border-color:var(--clay);color:var(--clay);}
 </style>
 </head>
 <body>
+
+<div class="toast-container" id="toast-container"></div>
 
 <div class="app-header">
   <h1>Meal Planner</h1>
@@ -1278,11 +1311,26 @@ async function uploadBackup(token, jsonContent){
   }
 }
 
+function showToast(message, type){
+  const container = document.getElementById('toast-container');
+  if(!container) return;
+  const el = document.createElement('div');
+  el.className = 'toast ' + (type||'success');
+  el.textContent = message;
+  container.appendChild(el);
+  requestAnimationFrame(()=> el.classList.add('show'));
+  setTimeout(()=>{
+    el.classList.remove('show');
+    setTimeout(()=> el.remove(), 200);
+  }, 4000);
+}
+
 window.doBackup = async function(){
   renderBackupMenu('Connecting to Google…');
   try{
     if(GOOGLE_CLIENT_ID.indexOf('YOUR_CLIENT_ID') === 0){
       renderBackupMenu('Not set up yet — add a Google client ID in the code first.');
+      showToast('Backup not set up yet — add a Google client ID in the code first.', 'error');
       return;
     }
     await loadGis();
@@ -1292,8 +1340,10 @@ window.doBackup = async function(){
     await uploadBackup(token, content);
     localStorage.setItem(STORAGE_PREFIX+'lastBackup', new Date().toISOString());
     renderBackupMenu('Backed up just now.');
+    showToast('Backed up to Google Drive.', 'success');
   }catch(err){
     renderBackupMenu('Backup failed — try again.');
+    showToast('Backup to Google Drive failed — try again.', 'error');
   }
 }
 
