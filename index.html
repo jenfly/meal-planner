@@ -302,6 +302,18 @@
   .multiselect-selected-item.shift-anim{
     transition:transform 150ms ease;
   }
+  .multiselect-selected-item.floating{
+    position:fixed;
+    z-index:60;
+    pointer-events:none;
+    cursor:grabbing;
+    box-shadow:0 10px 24px rgba(0,0,0,0.22);
+  }
+  .multiselect-control.drop-target{
+    border-color:var(--sage);
+    background:var(--sage-wash);
+    box-shadow:inset 0 0 0 2px var(--sage);
+  }
   .multiselect-pill-remove{
     display:inline-flex;
     align-items:center;
@@ -954,22 +966,40 @@ function attachWeekPillDragHandlers(card){
   });
 }
 
-// Same FLIP-based vertical reorder approach as the shopping list drag (see
-// beginShopDrag), but a plain click on a pill still needs to open the day's
-// dropdown, so dragging only kicks in once the pointer clears a small
+function getDayZones(){
+  return Array.from(document.querySelectorAll('#week-card .day-block')).map(block=>{
+    const control = block.querySelector('.multiselect-control');
+    return control ? { block, control, day: control.dataset.day } : null;
+  }).filter(Boolean);
+}
+
+// A pill drag has two modes. While the pointer stays inside the day's own
+// box, it's a FLIP-based vertical reorder (same technique as beginShopDrag).
+// Once the pointer leaves that box, the pill detaches (position:fixed) and
+// follows the pointer so it can be dropped onto a different day's box,
+// moving the meal there. A plain click still needs to open the day's
+// dropdown, so either mode only kicks in once the pointer clears a small
 // movement threshold — below that, the click passes through untouched.
 function beginPillDrag(e, pillEl){
-  const container = pillEl.closest('.multiselect-control');
-  const day = container.dataset.day;
+  const sourceContainer = pillEl.closest('.multiselect-control');
+  const sourceDay = sourceContainer.dataset.day;
+  const mealId = pillEl.dataset.mealId;
   const startX = e.clientX, startY = e.clientY;
   const pointerId = e.pointerId;
   const THRESHOLD = 6;
   let dragging = false;
+  let mode = null; // 'reorder' | 'move'
   let siblings, rects, draggedIndex, draggedHeight, afterEl, latestOrder;
+  let containerRect = null;
+  let dayZones = null;
+  let hoverDay = null;
+  let grabOffsetX = 0, grabOffsetY = 0;
 
-  function startDragNow(){
+  function startReorder(){
+    mode = 'reorder';
     dragging = true;
-    siblings = Array.from(container.querySelectorAll('.multiselect-selected-item'));
+    containerRect = sourceContainer.getBoundingClientRect();
+    siblings = Array.from(sourceContainer.querySelectorAll('.multiselect-selected-item'));
     draggedIndex = siblings.indexOf(pillEl);
     rects = new Map(siblings.map(el=>[el, el.getBoundingClientRect()]));
     draggedHeight = rects.get(pillEl).height;
@@ -980,13 +1010,8 @@ function beginPillDrag(e, pillEl){
     try{ pillEl.setPointerCapture(pointerId); }catch(err){}
   }
 
-  function onMove(ev){
+  function updateReorder(ev){
     const dy = ev.clientY - startY;
-    if(!dragging){
-      const dx = ev.clientX - startX;
-      if(Math.abs(dy) < THRESHOLD && Math.abs(dx) < THRESHOLD) return;
-      startDragNow();
-    }
     pillEl.style.transform = `translateY(${dy}px)`;
     const draggedCenter = rects.get(pillEl).top + dy + draggedHeight/2;
 
@@ -1008,21 +1033,72 @@ function beginPillDrag(e, pillEl){
     latestOrder = [...aboveStay, ...belowMoved, pillEl, ...aboveMoved, ...belowStay];
   }
 
+  function switchToMove(ev){
+    const rect = pillEl.getBoundingClientRect();
+    siblings.forEach(el=>{ if(el!==pillEl) el.style.transform = ''; });
+    setTimeout(()=>{ siblings.forEach(el=>{ if(el!==pillEl) el.classList.remove('shift-anim'); }); }, 170);
+    pillEl.classList.remove('dragging');
+    pillEl.style.transform = '';
+    grabOffsetX = ev.clientX - rect.left;
+    grabOffsetY = ev.clientY - rect.top;
+    pillEl.style.width = rect.width + 'px';
+    pillEl.style.left = rect.left + 'px';
+    pillEl.style.top = rect.top + 'px';
+    pillEl.classList.add('floating');
+    mode = 'move';
+    // Measured after .floating takes the pill out of flow, so the source
+    // box's now-collapsed height (and any days shifted up below it) are
+    // reflected in these rects.
+    dayZones = getDayZones().map(z=>{
+      const r = z.block.getBoundingClientRect();
+      return { day: z.day, control: z.control, top: r.top, bottom: r.bottom };
+    });
+    updateMove(ev);
+  }
+
+  function updateMove(ev){
+    pillEl.style.left = (ev.clientX - grabOffsetX) + 'px';
+    pillEl.style.top = (ev.clientY - grabOffsetY) + 'px';
+    let target = null;
+    for(const z of dayZones){
+      if(ev.clientY >= z.top && ev.clientY < z.bottom){ target = z; break; }
+    }
+    if(!target && dayZones.length){
+      if(ev.clientY < dayZones[0].top) target = dayZones[0];
+      else if(ev.clientY >= dayZones[dayZones.length-1].bottom) target = dayZones[dayZones.length-1];
+    }
+    const newHoverDay = target ? target.day : null;
+    if(newHoverDay !== hoverDay){
+      dayZones.forEach(z=> z.control.classList.remove('drop-target'));
+      if(target && target.day !== sourceDay) target.control.classList.add('drop-target');
+      hoverDay = newHoverDay;
+    }
+  }
+
+  function onMove(ev){
+    if(!dragging){
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      if(Math.abs(dx) < THRESHOLD && Math.abs(dy) < THRESHOLD) return;
+      startReorder();
+    }
+    if(mode === 'reorder'){
+      const withinContainer = ev.clientY >= containerRect.top && ev.clientY <= containerRect.bottom;
+      if(!withinContainer){ switchToMove(ev); return; }
+      updateReorder(ev);
+      return;
+    }
+    updateMove(ev);
+  }
+
   function suppressClick(ev){
     ev.stopPropagation();
     ev.preventDefault();
   }
 
-  function onUp(ev){
-    document.removeEventListener('pointermove', onMove);
-    document.removeEventListener('pointerup', onUp);
-    if(!dragging) return;
-    try{ pillEl.releasePointerCapture(pointerId); }catch(err){}
-    document.addEventListener('click', suppressClick, { capture:true, once:true });
-
+  function finalizeReorder(){
     const beforeRects = new Map(siblings.map(el=>[el, el.getBoundingClientRect()]));
 
-    latestOrder.forEach(el=> container.insertBefore(el, afterEl));
+    latestOrder.forEach(el=> sourceContainer.insertBefore(el, afterEl));
 
     siblings.forEach(el=>{
       el.classList.remove('shift-anim');
@@ -1036,7 +1112,7 @@ function beginPillDrag(e, pillEl){
       const dy = before.top - after.top;
       if(Math.abs(dy) > 0.5) el.style.transform = `translateY(${dy}px)`;
     });
-    void container.offsetHeight;
+    void sourceContainer.offsetHeight;
 
     requestAnimationFrame(()=>{
       siblings.forEach(el=>{
@@ -1053,7 +1129,34 @@ function beginPillDrag(e, pillEl){
       }, 170);
     });
 
-    finalizePillOrder(day, container);
+    finalizePillOrder(sourceDay, sourceContainer);
+  }
+
+  function onUp(ev){
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    try{ pillEl.releasePointerCapture(pointerId); }catch(err){}
+    if(!dragging) return;
+    document.addEventListener('click', suppressClick, { capture:true, once:true });
+
+    if(mode === 'reorder'){
+      finalizeReorder();
+      return;
+    }
+
+    // mode === 'move'
+    if(dayZones) dayZones.forEach(z=> z.control.classList.remove('drop-target'));
+    pillEl.classList.remove('floating');
+    pillEl.style.position = '';
+    pillEl.style.left = '';
+    pillEl.style.top = '';
+    pillEl.style.width = '';
+    pillEl.style.transform = '';
+    if(hoverDay && hoverDay !== sourceDay){
+      moveMealToDay(sourceDay, hoverDay, mealId);
+    } else {
+      renderWeek();
+    }
   }
 
   document.addEventListener('pointermove', onMove);
@@ -1064,6 +1167,19 @@ async function finalizePillOrder(day, container){
   const ids = Array.from(container.querySelectorAll('.multiselect-selected-item')).map(el=>el.dataset.mealId);
   week[day] = ids;
   await saveWeek();
+}
+
+async function moveMealToDay(sourceDay, targetDay, mealId){
+  if(week[sourceDay]){
+    week[sourceDay] = week[sourceDay].filter(id=>id!==mealId);
+    if(week[sourceDay].length===0) delete week[sourceDay];
+  }
+  if(!week[targetDay]) week[targetDay] = [];
+  if(!week[targetDay].includes(mealId)) week[targetDay].push(mealId);
+  await saveWeek();
+  renderWeek();
+  renderShop();
+  renderMeals();
 }
 
 window.toggleDropdown = function(day){
