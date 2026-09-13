@@ -441,6 +441,42 @@
     color:var(--ink-faint);
     margin-left:auto;
   }
+  .batch-card{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:9px 0;
+    border-bottom:1px solid var(--line);
+    font-size:15px;
+  }
+  .batch-card:last-child{border-bottom:none;}
+  .batch-card.checked .batch-card-name,
+  .batch-card.checked .batch-days{
+    text-decoration:line-through;
+    color:var(--ink-faint);
+  }
+  .batch-card.dragging{
+    position:relative;
+    z-index:50;
+    background:var(--card);
+    box-shadow:0 6px 16px rgba(0,0,0,0.14);
+    border-radius:8px;
+  }
+  .batch-card.shift-anim{
+    transition:transform 150ms ease;
+  }
+  .batch-card.dragging .drag-handle{cursor:grabbing;color:var(--sage-deep);}
+  .batch-card input[type="checkbox"]{
+    width:auto;
+    margin:0;
+  }
+  .batch-card-name{
+    flex:1;
+  }
+  .batch-days{
+    font-size:12px;
+    color:var(--ink-faint);
+  }
   .section-title{
     font-family:Georgia,serif;
     font-size:15px;
@@ -527,6 +563,7 @@
 
 <div class="tabs">
   <button class="tab active" data-tab="week">This week</button>
+  <button class="tab" data-tab="batch">Batch cook</button>
   <button class="tab" data-tab="shop">Shopping list</button>
   <button class="tab" data-tab="meals">My meals</button>
 </div>
@@ -536,6 +573,10 @@
   <div class="top-actions" style="margin-top:14px;">
     <button class="icon-btn" id="clear-week">Clear all days</button>
   </div>
+</div>
+
+<div id="panel-batch" class="panel">
+  <div class="card" id="batch-list"></div>
 </div>
 
 <div id="panel-shop" class="panel">
@@ -574,6 +615,8 @@ let daySearch = {};
 let shopExtras = [];
 let shopChecked = {};
 let shopOrder = [];
+let batchOrder = [];
+let batchChecked = {};
 let editingId = null;
 let mealSort = localStorage.getItem('mealRotation.mealSort') || 'due';
 let mealSearchQuery = '';
@@ -825,9 +868,14 @@ function loadAll(){
   catch(e){ shopChecked = {}; }
   try{ shopOrder = JSON.parse(localStorage.getItem(STORAGE_PREFIX+'shopOrder')) || []; }
   catch(e){ shopOrder = []; }
+  try{ batchOrder = JSON.parse(localStorage.getItem(STORAGE_PREFIX+'batchOrder')) || []; }
+  catch(e){ batchOrder = []; }
+  try{ batchChecked = JSON.parse(localStorage.getItem(STORAGE_PREFIX+'batchChecked')) || {}; }
+  catch(e){ batchChecked = {}; }
   renderMeals();
   renderWeek();
   renderShop();
+  renderBatch();
 }
 
 function saveMeals(){
@@ -845,6 +893,12 @@ function saveShopChecked(){
 function saveShopOrder(){
   localStorage.setItem(STORAGE_PREFIX+'shopOrder', JSON.stringify(shopOrder));
 }
+function saveBatchOrder(){
+  localStorage.setItem(STORAGE_PREFIX+'batchOrder', JSON.stringify(batchOrder));
+}
+function saveBatchChecked(){
+  localStorage.setItem(STORAGE_PREFIX+'batchChecked', JSON.stringify(batchChecked));
+}
 
 document.querySelectorAll('.tab').forEach(t=>{
   t.addEventListener('click', ()=>{
@@ -854,6 +908,7 @@ document.querySelectorAll('.tab').forEach(t=>{
     document.getElementById('panel-'+t.dataset.tab).classList.add('active');
     if(t.dataset.tab==='shop') renderShop();
     if(t.dataset.tab==='week') renderWeek();
+    if(t.dataset.tab==='batch') renderBatch();
   });
 });
 
@@ -1477,6 +1532,7 @@ async function moveMealToDay(sourceDay, targetDay, mealId){
   await saveWeek();
   renderWeek();
   renderShop();
+  renderBatch();
   renderMeals();
 }
 
@@ -1498,6 +1554,7 @@ window.toggleDayMeal = async function(day, mealId){
   await saveWeek();
   renderShop();
   renderWeek();
+  renderBatch();
   renderMeals();
 }
 
@@ -1515,6 +1572,7 @@ window.removeMealFromDay = async function(event, day, mealId){
   await saveWeek();
   renderShop();
   renderWeek();
+  renderBatch();
 }
 
 window.clearDay = async function(event, day){
@@ -1524,6 +1582,7 @@ window.clearDay = async function(event, day){
   await saveWeek();
   renderShop();
   renderWeek();
+  renderBatch();
 }
 
 window.toggleMarkMadeDay = function(event, day){
@@ -1558,6 +1617,7 @@ window.confirmMarkMade = async function(event, day){
   renderWeek();
   renderMeals();
   renderShop();
+  renderBatch();
 }
 
 document.addEventListener('click', (e)=>{
@@ -1590,6 +1650,7 @@ document.getElementById('clear-week').addEventListener('click', async ()=>{
   await saveWeek();
   renderWeek();
   renderShop();
+  renderBatch();
 });
 
 function capitalizeFirst(s){
@@ -1782,6 +1843,165 @@ async function finalizeShopOrder(){
   const ids = Array.from(box.querySelectorAll('.shop-item')).map(el=>decodeURIComponent(el.dataset.id));
   shopOrder = ids;
   await saveShopOrder();
+}
+
+function renderBatch(){
+  const box = document.getElementById('batch-list');
+  const allIds = [];
+  DAYS.forEach(d=>{
+    (week[d]||[]).forEach(id=>{ if(!allIds.includes(id)) allIds.push(id); });
+  });
+  const batchIds = allIds.filter(id=>{
+    const m = meals.find(x=>x.id===id);
+    return m && (m.categories||[]).some(c=>c.toLowerCase()==='batch cook');
+  });
+
+  // Reconcile persisted order with this week's batch-cook meals: drop stale
+  // ids, append newly-planned ones to the bottom.
+  const validIds = new Set(batchIds);
+  const existingIds = new Set(batchOrder);
+  let orderChanged = false;
+  batchOrder = batchOrder.filter(id=>{
+    const keep = validIds.has(id);
+    if(!keep) orderChanged = true;
+    return keep;
+  });
+  batchIds.forEach(id=>{
+    if(!existingIds.has(id)){
+      orderChanged = true;
+      batchOrder.push(id);
+    }
+  });
+  if(orderChanged) saveBatchOrder();
+
+  if(batchOrder.length===0){
+    box.innerHTML = '<div class="empty">No meals tagged "batch cook" are planned this week.</div>';
+    return;
+  }
+
+  const unchecked = batchOrder.filter(id=>!batchChecked[id]);
+  const checked = batchOrder.filter(id=>batchChecked[id]);
+  const orderedIds = [...unchecked, ...checked];
+
+  box.innerHTML = orderedIds.map(id=>{
+    const m = meals.find(x=>x.id===id);
+    const days = DAYS.filter(d=>(week[d]||[]).includes(id));
+    const isChecked = !!batchChecked[id];
+    return `
+    <div class="batch-card ${isChecked?'checked':''}" data-id="${encodeURIComponent(id)}" data-checked="${isChecked?'1':'0'}">
+      <span class="drag-handle" title="Drag to reorder">${ICON_GRIP}</span>
+      <input type="checkbox" ${isChecked?'checked':''} onchange="toggleBatchCooked('${id}')">
+      <span class="batch-card-name">${escapeHtml(m.name)}</span>
+      <span class="batch-days">${days.map(d=>escapeHtml(d)).join(', ')}</span>
+    </div>`;
+  }).join('');
+
+  attachBatchDragHandlers();
+}
+
+window.toggleBatchCooked = async function(id){
+  batchChecked[id] = !batchChecked[id];
+  await saveBatchChecked();
+  renderBatch();
+}
+
+function attachBatchDragHandlers(){
+  document.querySelectorAll('#batch-list .batch-card').forEach(rowEl=>{
+    const handle = rowEl.querySelector('.drag-handle');
+    if(handle) handle.onpointerdown = (e)=> beginBatchDrag(e, rowEl);
+  });
+}
+
+function beginBatchDrag(e, rowEl){
+  e.preventDefault();
+  const container = rowEl.parentElement;
+  const groupAttr = rowEl.dataset.checked;
+  const siblings = Array.from(container.querySelectorAll('.batch-card')).filter(el=>el.dataset.checked===groupAttr);
+  const draggedIndex = siblings.indexOf(rowEl);
+  const rects = new Map(siblings.map(el=>[el, el.getBoundingClientRect()]));
+  const draggedHeight = rects.get(rowEl).height;
+  const afterEl = siblings[siblings.length-1].nextElementSibling;
+  const startY = e.clientY;
+  const pointerId = e.pointerId;
+  rowEl.classList.add('dragging');
+  siblings.forEach(el=>{ if(el!==rowEl) el.classList.add('shift-anim'); });
+  try{ rowEl.setPointerCapture(pointerId); }catch(err){}
+
+  let latestOrder = siblings.slice();
+
+  function onMove(ev){
+    const dy = ev.clientY - startY;
+    rowEl.style.transform = `translateY(${dy}px)`;
+    const draggedCenter = rects.get(rowEl).top + dy + draggedHeight/2;
+
+    const aboveStay = [], aboveMoved = [], belowMoved = [], belowStay = [];
+    siblings.forEach((sib, idx)=>{
+      if(sib===rowEl) return;
+      const r = rects.get(sib);
+      const sibCenter = r.top + r.height/2;
+      if(idx < draggedIndex){
+        const displaced = draggedCenter < sibCenter;
+        sib.style.transform = displaced ? `translateY(${draggedHeight}px)` : '';
+        (displaced ? aboveMoved : aboveStay).push(sib);
+      } else {
+        const displaced = draggedCenter > sibCenter;
+        sib.style.transform = displaced ? `translateY(${-draggedHeight}px)` : '';
+        (displaced ? belowMoved : belowStay).push(sib);
+      }
+    });
+    latestOrder = [...aboveStay, ...belowMoved, rowEl, ...aboveMoved, ...belowStay];
+  }
+
+  function onUp(ev){
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    try{ rowEl.releasePointerCapture(pointerId); }catch(err){}
+
+    const beforeRects = new Map(siblings.map(el=>[el, el.getBoundingClientRect()]));
+
+    latestOrder.forEach(el=> container.insertBefore(el, afterEl));
+
+    siblings.forEach(el=>{
+      el.classList.remove('shift-anim');
+      el.style.transition = 'none';
+      el.style.transform = '';
+    });
+
+    siblings.forEach(el=>{
+      const before = beforeRects.get(el);
+      const after = el.getBoundingClientRect();
+      const dy = before.top - after.top;
+      if(Math.abs(dy) > 0.5) el.style.transform = `translateY(${dy}px)`;
+    });
+    void container.offsetHeight;
+
+    requestAnimationFrame(()=>{
+      siblings.forEach(el=>{
+        el.style.transition = '';
+        el.classList.add('shift-anim');
+        el.style.transform = '';
+      });
+      setTimeout(()=>{
+        siblings.forEach(el=>{
+          el.classList.remove('shift-anim');
+          el.style.transition = '';
+        });
+        rowEl.classList.remove('dragging');
+      }, 170);
+    });
+
+    finalizeBatchOrder();
+  }
+
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+}
+
+async function finalizeBatchOrder(){
+  const box = document.getElementById('batch-list');
+  const ids = Array.from(box.querySelectorAll('.batch-card')).map(el=>decodeURIComponent(el.dataset.id));
+  batchOrder = ids;
+  await saveBatchOrder();
 }
 
 document.getElementById('add-extra').addEventListener('click', async ()=>{
@@ -1980,6 +2200,7 @@ window.doRestore = async function(){
     renderMeals();
     renderWeek();
     renderShop();
+    renderBatch();
     renderBackupMenu('Restored just now.');
     if(added || updated){
       showToast(`Restored from Google Drive: ${added} added, ${updated} updated.`, 'success');
