@@ -108,11 +108,17 @@
     padding:14px 16px;
     margin-bottom:12px;
   }
+  .meal-title-row{
+    display:flex;
+    align-items:baseline;
+    flex-wrap:wrap;
+    gap:8px 10px;
+    margin:0 0 4px;
+  }
   .meal-name{
     font-family:Georgia,serif;
     font-size:17px;
     font-weight:600;
-    margin:0 0 4px;
   }
   .meal-parts{
     font-size:14px;
@@ -128,7 +134,7 @@
     margin-top:8px;
   }
   .meal-icon-actions{display:flex;gap:6px;}
-  .made-today-btn{width:100%;margin-top:8px;text-align:center;}
+  .made-today-btn{flex:1;text-align:center;margin-top:0;}
   .pill{
     display:inline-block;
     font-size:12px;
@@ -136,6 +142,7 @@
     border-radius:999px;
     background:var(--sage-wash);
     color:var(--sage-deep);
+    flex-shrink:0;
   }
   .pill.stale{background:var(--mustard-wash);color:var(--mustard);}
   .row{display:flex;gap:8px;align-items:center;}
@@ -147,13 +154,14 @@
   button.icon-btn:active{transform:scale(0.97);}
   .meal-actions-row{
     display:flex;
-    justify-content:flex-end;
-    gap:6px;
-    margin-top:8px;
+    align-items:center;
+    gap:8px;
+    margin-top:10px;
   }
   .icon-only-btn{
-    width:32px;
-    height:32px;
+    width:40px;
+    height:40px;
+    flex-shrink:0;
     display:flex;
     align-items:center;
     justify-content:center;
@@ -167,7 +175,7 @@
   .icon-only-btn:hover{border-color:var(--sage);color:var(--sage-deep);}
   .icon-only-btn.danger:hover{border-color:var(--clay);color:var(--clay);}
   .icon-only-btn:active{transform:scale(0.95);}
-  .icon-only-btn svg{width:14px;height:14px;display:block;}
+  .icon-only-btn svg{width:18px;height:18px;display:block;}
   .btn-primary{
     background:var(--sage);color:#fff;border:none;border-radius:8px;
     padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;
@@ -360,6 +368,25 @@
     text-decoration:line-through;
     color:var(--ink-faint);
   }
+  .shop-item.dragging{
+    position:relative;
+    z-index:50;
+    background:var(--card);
+    box-shadow:0 6px 16px rgba(0,0,0,0.14);
+    border-radius:8px;
+  }
+  .drag-handle{
+    display:flex;
+    align-items:center;
+    flex-shrink:0;
+    color:var(--ink-faint);
+    cursor:grab;
+    touch-action:none;
+    -webkit-user-select:none;
+    user-select:none;
+  }
+  .drag-handle:active{cursor:grabbing;}
+  .shop-item.dragging .drag-handle{cursor:grabbing;color:var(--sage-deep);}
   .shop-source{
     font-size:12px;
     color:var(--ink-faint);
@@ -413,12 +440,12 @@
 </div>
 
 <div id="panel-shop" class="panel">
-  <div class="card" id="shop-list"></div>
-  <div class="section-title">Add something else</div>
-  <div class="row">
+  <div class="section-title" style="margin-top:0;">Add something else</div>
+  <div class="row" style="margin-bottom:16px;">
     <input type="text" id="extra-item" placeholder="e.g. paper towels" style="margin-bottom:0;">
     <button class="icon-btn" id="add-extra">Add</button>
   </div>
+  <div class="card" id="shop-list"></div>
 </div>
 
 <div id="panel-meals" class="panel">
@@ -446,9 +473,27 @@ let openDropdownDay = null;
 let daySearch = {};
 let shopExtras = [];
 let shopChecked = {};
+let shopOrder = [];
 let editingId = null;
 let mealSort = localStorage.getItem('mealRotation.mealSort') || 'due';
 let openMealDayPicker = null;
+let confirmDeleteId = null;
+
+const MEAL_COLORS = [
+  { bg:'#E7EEE1', fg:'#3E5236' }, // sage
+  { bg:'#F5E1D8', fg:'#B9583A' }, // clay
+  { bg:'#F5E8D3', fg:'#B9822E' }, // mustard
+  { bg:'#E3EAF2', fg:'#33587A' }, // blue
+  { bg:'#EDE3F2', fg:'#6B3F8C' }, // plum
+  { bg:'#F2E3E9', fg:'#8C3F5F' }, // berry
+  { bg:'#E3F0EC', fg:'#2F7A63' }, // teal
+  { bg:'#F2ECE3', fg:'#8C6B3F' }, // tan
+];
+function mealColor(id){
+  let hash = 0;
+  for(let i=0;i<id.length;i++){ hash = (hash*31 + id.charCodeAt(i)) >>> 0; }
+  return MEAL_COLORS[hash % MEAL_COLORS.length];
+}
 
 function uid(){ return 'm_' + Math.random().toString(36).slice(2,9); }
 
@@ -465,10 +510,14 @@ function loadAll(){
       week[d] = Object.values(week[d]).filter(Boolean);
     }
   });
-  try{ shopExtras = JSON.parse(localStorage.getItem(STORAGE_PREFIX+'shopExtras')) || []; }
-  catch(e){ shopExtras = []; }
+  try{
+    const rawExtras = JSON.parse(localStorage.getItem(STORAGE_PREFIX+'shopExtras')) || [];
+    shopExtras = rawExtras.map(x => typeof x === 'string' ? { id: uid(), label: x } : x);
+  }catch(e){ shopExtras = []; }
   try{ shopChecked = JSON.parse(localStorage.getItem(STORAGE_PREFIX+'shopChecked')) || {}; }
   catch(e){ shopChecked = {}; }
+  try{ shopOrder = JSON.parse(localStorage.getItem(STORAGE_PREFIX+'shopOrder')) || []; }
+  catch(e){ shopOrder = []; }
   renderMeals();
   renderWeek();
   renderShop();
@@ -486,6 +535,9 @@ function saveShopExtras(){
 function saveShopChecked(){
   localStorage.setItem(STORAGE_PREFIX+'shopChecked', JSON.stringify(shopChecked));
 }
+function saveShopOrder(){
+  localStorage.setItem(STORAGE_PREFIX+'shopOrder', JSON.stringify(shopOrder));
+}
 
 document.querySelectorAll('.tab').forEach(t=>{
   t.addEventListener('click', ()=>{
@@ -501,6 +553,7 @@ document.querySelectorAll('.tab').forEach(t=>{
 const ICON_CALENDAR_PLUS = '<svg viewBox="0 0 448 512"><path fill="currentColor" d="M128 0c17.7 0 32 14.3 32 32l0 32 128 0 0-32c0-17.7 14.3-32 32-32s32 14.3 32 32l0 32 32 0c35.3 0 64 28.7 64 64l0 288c0 35.3-28.7 64-64 64L64 480c-35.3 0-64-28.7-64-64L0 128C0 92.7 28.7 64 64 64l32 0 0-32c0-17.7 14.3-32 32-32zm96 192c-13.3 0-24 10.7-24 24l0 48-48 0c-13.3 0-24 10.7-24 24s10.7 24 24 24l48 0 0 48c0 13.3 10.7 24 24 24s24-10.7 24-24l0-48 48 0c13.3 0 24-10.7 24-24s-10.7-24-24-24l-48 0 0-48c0-13.3-10.7-24-24-24z"/></svg>';
 const ICON_PEN = '<svg viewBox="0 0 512 512"><path fill="currentColor" d="M471.6 21.7c-21.9-21.9-57.3-21.9-79.2 0L368 46.1 465.9 144 490.3 119.6c21.9-21.9 21.9-57.3 0-79.2L471.6 21.7zm-299.2 220c-6.1 6.1-10.8 13.6-13.5 21.9l-29.6 88.8c-2.9 8.6-.6 18.1 5.8 24.6s15.9 8.7 24.6 5.8l88.8-29.6c8.2-2.7 15.7-7.4 21.9-13.5L432 177.9 334.1 80 172.4 241.7zM96 64C43 64 0 107 0 160L0 416c0 53 43 96 96 96l256 0c53 0 96-43 96-96l0-96c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 96c0 17.7-14.3 32-32 32L96 448c-17.7 0-32-14.3-32-32l0-256c0-17.7 14.3-32 32-32l96 0c17.7 0 32-14.3 32-32s-14.3-32-32-32L96 64z"/></svg>';
 const ICON_TRASH = '<svg viewBox="0 0 448 512"><path fill="currentColor" d="M136.7 5.9L128 32 32 32C14.3 32 0 46.3 0 64S14.3 96 32 96l384 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-96 0-8.7-26.1C306.9-7.2 294.7-16 280.9-16L167.1-16c-13.8 0-26 8.8-30.4 21.9zM416 144L32 144 53.1 467.1C54.7 492.4 75.7 512 101 512L347 512c25.3 0 46.3-19.6 47.9-44.9L416 144z"/></svg>';
+const ICON_GRIP = '<svg viewBox="0 0 16 16" width="14" height="14"><circle cx="5" cy="3" r="1.3" fill="currentColor"/><circle cx="11" cy="3" r="1.3" fill="currentColor"/><circle cx="5" cy="8" r="1.3" fill="currentColor"/><circle cx="11" cy="8" r="1.3" fill="currentColor"/><circle cx="5" cy="13" r="1.3" fill="currentColor"/><circle cx="11" cy="13" r="1.3" fill="currentColor"/></svg>';
 
 function daysAgo(dateStr){
   if(!dateStr) return null;
@@ -541,20 +594,32 @@ function renderMeals(){
     else { metaText = 'made ' + ago + 'd ago'; }
     const assignedDays = DAYS.filter(d=>(week[d]||[]).includes(m.id));
     const pickerOpen = openMealDayPicker === m.id;
+    const confirmingDelete = confirmDeleteId === m.id;
+    const isEditing = editingId === m.id;
     return `
     <div class="card">
-      <div class="meal-name">${escapeHtml(m.name)}</div>
+      <div class="meal-title-row">
+        <span class="meal-name">${escapeHtml(m.name)}</span>
+        <span class="pill ${metaClass}">${metaText}</span>
+      </div>
       ${m.parts ? `<div class="meal-parts">${escapeHtml(m.parts)}</div>` : ''}
       ${assignedDays.length>0 ? `<div class="meal-parts">This week: ${assignedDays.join(', ')}</div>` : ''}
-      <div class="meal-meta">
-        <span class="pill ${metaClass}">${metaText}</span>
-        <div class="meal-icon-actions">
+      ${confirmingDelete ? `
+        <div class="day-picker" style="padding:12px 10px;margin-top:10px;">
+          <div style="font-size:14px;color:var(--ink);margin-bottom:10px;">Delete "${escapeHtml(m.name)}"? This can't be undone.</div>
+          <div class="row" style="justify-content:flex-end;gap:8px;">
+            <button class="link-btn" onclick="cancelDeleteMeal()">Cancel</button>
+            <button class="icon-btn danger" style="border-color:var(--clay);color:var(--clay);" onclick="deleteMeal('${m.id}')">Delete meal</button>
+          </div>
+        </div>
+      ` : isEditing ? mealEditFormHtml(m) : `
+        <div class="meal-actions-row">
+          <button class="icon-btn made-today-btn" onclick="markMade('${m.id}')">Made this today</button>
           <button class="icon-only-btn day-picker-btn" onclick="toggleMealDayPicker(event,'${m.id}')" title="Add to week">${ICON_CALENDAR_PLUS}</button>
           <button class="icon-only-btn" onclick="editMeal('${m.id}')" title="Edit">${ICON_PEN}</button>
-          <button class="icon-only-btn danger" onclick="deleteMeal('${m.id}')" title="Delete">${ICON_TRASH}</button>
+          <button class="icon-only-btn danger" onclick="askDeleteMeal('${m.id}')" title="Delete">${ICON_TRASH}</button>
         </div>
-      </div>
-      <button class="icon-btn made-today-btn" onclick="markMade('${m.id}')">Made this today</button>
+      `}
       ${pickerOpen ? `
         <div class="day-picker">
           <div class="day-picker-title">Add "${escapeHtml(m.name)}" to:</div>
@@ -570,6 +635,23 @@ function renderMeals(){
   }).join('');
 }
 
+function mealEditFormHtml(m){
+  return `
+    <div class="form-wrap" style="margin:10px 0 0;padding:0;background:none;border:none;">
+      <label class="field-label">Meal name</label>
+      <input type="text" id="f-name-${m.id}" value="${escapeHtml(m.name)}">
+      <label class="field-label">Parts (optional — base, main, side)</label>
+      <input type="text" id="f-parts-${m.id}" value="${escapeHtml(m.parts||'')}">
+      <label class="field-label">Items to have on hand (comma separated)</label>
+      <textarea id="f-items-${m.id}" rows="2">${escapeHtml((m.items||[]).join(', '))}</textarea>
+      <div class="row" style="justify-content:flex-end;gap:8px;">
+        <button class="link-btn" onclick="cancelMealEdit()">Cancel</button>
+        <button class="btn-primary" onclick="saveMealEdit('${m.id}')">Save changes</button>
+      </div>
+    </div>
+  `;
+}
+
 function escapeHtml(s){
   const d = document.createElement('div');
   d.textContent = s || '';
@@ -581,6 +663,18 @@ window.markMade = async function(id){
   if(m){ m.lastMade = new Date().toISOString(); await saveMeals(); renderMeals(); }
 }
 
+window.askDeleteMeal = function(id){
+  confirmDeleteId = id;
+  openMealDayPicker = null;
+  editingId = null;
+  renderMeals();
+}
+
+window.cancelDeleteMeal = function(){
+  confirmDeleteId = null;
+  renderMeals();
+}
+
 window.deleteMeal = async function(id){
   meals = meals.filter(x=>x.id!==id);
   Object.keys(week).forEach(d=>{
@@ -588,6 +682,8 @@ window.deleteMeal = async function(id){
     if(week[d].length===0) delete week[d];
   });
   if(openMealDayPicker===id) openMealDayPicker = null;
+  if(confirmDeleteId===id) confirmDeleteId = null;
+  if(editingId===id) editingId = null;
   await saveMeals();
   await saveWeek();
   renderMeals();
@@ -596,28 +692,51 @@ window.deleteMeal = async function(id){
 
 window.editMeal = function(id){
   editingId = id;
-  const m = meals.find(x=>x.id===id);
-  showForm(m);
+  confirmDeleteId = null;
+  openMealDayPicker = null;
+  document.getElementById('add-form-wrap').innerHTML = '';
+  renderMeals();
+}
+
+window.cancelMealEdit = function(){
+  editingId = null;
+  renderMeals();
+}
+
+window.saveMealEdit = async function(id){
+  const nameInput = document.getElementById('f-name-'+id);
+  const name = nameInput.value.trim();
+  if(!name){
+    nameInput.style.borderColor = '#B9583A';
+    return;
+  }
+  const parts = document.getElementById('f-parts-'+id).value.trim();
+  const items = document.getElementById('f-items-'+id).value.split(',').map(s=>s.trim()).filter(Boolean);
+  const existing = meals.find(x=>x.id===id);
+  existing.name = name; existing.parts = parts; existing.items = items;
+  await saveMeals();
+  editingId = null;
+  renderMeals();
 }
 
 document.getElementById('show-add-form').addEventListener('click', ()=>{
   editingId = null;
-  showForm(null);
+  showForm();
 });
 
-function showForm(m){
+function showForm(){
   const wrap = document.getElementById('add-form-wrap');
   wrap.innerHTML = `
     <div class="form-wrap">
       <label class="field-label">Meal name</label>
-      <input type="text" id="f-name" value="${m?escapeHtml(m.name):''}">
+      <input type="text" id="f-name">
       <label class="field-label">Parts (optional — base, main, side)</label>
-      <input type="text" id="f-parts" value="${m?escapeHtml(m.parts||''):''}">
+      <input type="text" id="f-parts">
       <label class="field-label">Items to have on hand (comma separated)</label>
-      <textarea id="f-items" rows="2">${m?escapeHtml((m.items||[]).join(', ')):''}</textarea>
+      <textarea id="f-items" rows="2"></textarea>
       <div class="row" style="justify-content:flex-end;gap:8px;">
         <button class="link-btn" id="f-cancel">Cancel</button>
-        <button class="btn-primary" id="f-save">${m?'Save changes':'Save meal'}</button>
+        <button class="btn-primary" id="f-save">Save meal</button>
       </div>
     </div>
   `;
@@ -631,12 +750,7 @@ function showForm(m){
     }
     const parts = document.getElementById('f-parts').value.trim();
     const items = document.getElementById('f-items').value.split(',').map(s=>s.trim()).filter(Boolean);
-    if(editingId){
-      const existing = meals.find(x=>x.id===editingId);
-      existing.name = name; existing.parts = parts; existing.items = items;
-    } else {
-      meals.push({ id: uid(), name, parts, items, lastMade: null, createdAt: new Date().toISOString() });
-    }
+    meals.push({ id: uid(), name, parts, items, lastMade: null, createdAt: new Date().toISOString() });
     await saveMeals();
     wrap.innerHTML = '';
     renderMeals();
@@ -662,12 +776,14 @@ function renderWeek(){
           <div class="multiselect-control" onclick="toggleDropdown('${d}')">
             ${selectedMeals.length===0
               ? '<span class="multiselect-placeholder">— not planned —</span>'
-              : selectedMeals.map(m=>`
-                  <span class="multiselect-selected-item">
+              : selectedMeals.map(m=>{
+                  const c = mealColor(m.id);
+                  return `
+                  <span class="multiselect-selected-item" style="background:${c.bg};color:${c.fg};">
                     ${escapeHtml(m.name)}
-                    <span class="multiselect-pill-remove" onclick="removeMealFromDay(event,'${d}','${m.id}')">✕</span>
+                    <span class="multiselect-pill-remove" style="color:${c.fg};" onclick="removeMealFromDay(event,'${d}','${m.id}')">✕</span>
                   </span>
-                `).join('')}
+                `;}).join('')}
             ${selectedMeals.length>0 ? `<span class="multiselect-clear-day" onclick="clearDay(event,'${d}')" title="Clear ${d}">✕</span>` : ''}
           </div>
           ${isOpen ? `
@@ -755,6 +871,10 @@ document.addEventListener('click', (e)=>{
     openMealDayPicker = null;
     renderMeals();
   }
+  if(confirmDeleteId && !e.target.closest('.card')){
+    confirmDeleteId = null;
+    renderMeals();
+  }
 });
 
 document.getElementById('clear-week').addEventListener('click', async ()=>{
@@ -765,6 +885,11 @@ document.getElementById('clear-week').addEventListener('click', async ()=>{
   renderWeek();
   renderShop();
 });
+
+function capitalizeFirst(s){
+  if(!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 function renderShop(){
   const box = document.getElementById('shop-list');
@@ -783,24 +908,58 @@ function renderShop(){
       grouped[key].sources.push(m.name);
     });
   });
-  const rows = [];
+
+  const rowsById = {};
   Object.keys(grouped).forEach(key=>{
-    rows.push({ id: 'g_'+key, label: grouped[key].label, source: grouped[key].sources.join(', ') });
+    const id = 'g_'+key;
+    rowsById[id] = { id, label: capitalizeFirst(grouped[key].label), source: grouped[key].sources.join(', '), manual:false };
   });
-  shopExtras.forEach((label, i)=>{
-    rows.push({ id: 'x_'+i, label, source: 'added by you' });
+  shopExtras.forEach(ex=>{
+    const id = 'x_'+ex.id;
+    rowsById[id] = { id, label: ex.label, source: 'added by you', manual:true };
   });
-  if(rows.length===0){
+
+  // Reconcile persisted order with current rows: drop stale ids, place new ones
+  // (manual items go to the top, auto/meal-derived items go to the bottom).
+  const validIds = new Set(Object.keys(rowsById));
+  const existingIds = new Set(shopOrder);
+  let orderChanged = false;
+  shopOrder = shopOrder.filter(id=>{
+    const keep = validIds.has(id);
+    if(!keep) orderChanged = true;
+    return keep;
+  });
+  Object.keys(rowsById).forEach(id=>{
+    if(!existingIds.has(id)){
+      orderChanged = true;
+      if(rowsById[id].manual) shopOrder.unshift(id);
+      else shopOrder.push(id);
+    }
+  });
+  if(orderChanged) saveShopOrder();
+
+  if(Object.keys(rowsById).length===0){
     box.innerHTML = '<div class="empty">Plan some meals for the week to build your list, or add items below.</div>';
     return;
   }
-  box.innerHTML = rows.map(r=>`
-    <div class="shop-item ${shopChecked[r.id]?'checked':''}">
-      <input type="checkbox" ${shopChecked[r.id]?'checked':''} onchange="toggleCheck('${r.id}')">
+
+  const unchecked = shopOrder.filter(id=>!shopChecked[id]);
+  const checked = shopOrder.filter(id=>shopChecked[id]);
+  const orderedIds = [...unchecked, ...checked];
+
+  box.innerHTML = orderedIds.map(id=>{
+    const r = rowsById[id];
+    const isChecked = !!shopChecked[id];
+    return `
+    <div class="shop-item ${isChecked?'checked':''}" data-id="${encodeURIComponent(id)}" data-checked="${isChecked?'1':'0'}">
+      <span class="drag-handle" title="Drag to reorder">${ICON_GRIP}</span>
+      <input type="checkbox" ${isChecked?'checked':''} onchange="toggleCheck('${id}')">
       <span>${escapeHtml(r.label)}</span>
       <span class="shop-source">${escapeHtml(r.source)}</span>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
+
+  attachShopDragHandlers();
 }
 
 window.toggleCheck = async function(id){
@@ -809,11 +968,74 @@ window.toggleCheck = async function(id){
   renderShop();
 }
 
+function attachShopDragHandlers(){
+  document.querySelectorAll('#shop-list .shop-item').forEach(rowEl=>{
+    const handle = rowEl.querySelector('.drag-handle');
+    if(handle) handle.onpointerdown = (e)=> beginShopDrag(e, rowEl);
+  });
+}
+
+function beginShopDrag(e, rowEl){
+  e.preventDefault();
+  const container = rowEl.parentElement;
+  const groupAttr = rowEl.dataset.checked;
+  let siblings = Array.from(container.querySelectorAll('.shop-item')).filter(el=>el.dataset.checked===groupAttr);
+  let startY = e.clientY;
+  const pointerId = e.pointerId;
+  rowEl.classList.add('dragging');
+  try{ rowEl.setPointerCapture(pointerId); }catch(err){}
+
+  function onMove(ev){
+    const dy = ev.clientY - startY;
+    rowEl.style.transform = `translateY(${dy}px)`;
+    const centerY = ev.clientY;
+    const idx = siblings.indexOf(rowEl);
+    for(const sib of siblings){
+      if(sib===rowEl) continue;
+      const rect = sib.getBoundingClientRect();
+      const sibCenter = rect.top + rect.height/2;
+      const sibIdx = siblings.indexOf(sib);
+      if(sibIdx < idx && centerY < sibCenter){
+        container.insertBefore(rowEl, sib);
+        startY += rect.height;
+        rowEl.style.transform = `translateY(${ev.clientY - startY}px)`;
+        siblings = Array.from(container.querySelectorAll('.shop-item')).filter(el=>el.dataset.checked===groupAttr);
+        break;
+      } else if(sibIdx > idx && centerY > sibCenter){
+        container.insertBefore(rowEl, sib.nextSibling);
+        startY -= rect.height;
+        rowEl.style.transform = `translateY(${ev.clientY - startY}px)`;
+        siblings = Array.from(container.querySelectorAll('.shop-item')).filter(el=>el.dataset.checked===groupAttr);
+        break;
+      }
+    }
+  }
+
+  function onUp(ev){
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    rowEl.classList.remove('dragging');
+    rowEl.style.transform = '';
+    try{ rowEl.releasePointerCapture(pointerId); }catch(err){}
+    finalizeShopOrder();
+  }
+
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+}
+
+async function finalizeShopOrder(){
+  const box = document.getElementById('shop-list');
+  const ids = Array.from(box.querySelectorAll('.shop-item')).map(el=>decodeURIComponent(el.dataset.id));
+  shopOrder = ids;
+  await saveShopOrder();
+}
+
 document.getElementById('add-extra').addEventListener('click', async ()=>{
   const inp = document.getElementById('extra-item');
   const val = inp.value.trim();
   if(!val) return;
-  shopExtras.push(val);
+  shopExtras.push({ id: uid(), label: val });
   inp.value = '';
   await saveShopExtras();
   renderShop();
