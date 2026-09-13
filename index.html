@@ -230,7 +230,24 @@
     justify-content:space-between;
     margin:0 0 8px;
   }
-  .day-heading-row .day-heading{margin:0;}
+  .day-heading-row .day-heading{margin:0;display:flex;align-items:center;}
+  .day-block-today{
+    background:var(--sage-wash);
+    margin:0 -16px;
+    padding:12px 16px;
+    border-radius:8px;
+    border-bottom:none;
+  }
+  .today-badge{
+    font-family:system-ui,sans-serif;
+    font-size:11px;
+    font-weight:600;
+    color:var(--sage-deep);
+    background:#fff;
+    padding:2px 8px;
+    border-radius:999px;
+    margin-left:8px;
+  }
   .mark-made-btn{width:32px;height:32px;flex-shrink:0;}
   .mark-made-btn svg{width:16px;height:16px;}
   .mark-made-panel{
@@ -569,6 +586,12 @@
 </div>
 
 <div id="panel-week" class="panel active">
+  <div class="row" style="justify-content:flex-end;margin-bottom:10px;">
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-soft);cursor:pointer;">
+      <input type="checkbox" id="rotate-to-today-toggle" style="margin:0;">
+      Start with today
+    </label>
+  </div>
   <div class="card" id="week-card"></div>
   <div class="top-actions" style="margin-top:14px;">
     <button class="icon-btn" id="clear-week">Clear all days</button>
@@ -617,6 +640,7 @@ let shopChecked = {};
 let shopOrder = [];
 let batchOrder = [];
 let batchChecked = {};
+let rotateToToday = localStorage.getItem('mealRotation.rotateToToday') !== 'false';
 let editingId = null;
 let mealSort = localStorage.getItem('mealRotation.mealSort') || 'due';
 let mealSearchQuery = '';
@@ -926,6 +950,20 @@ function daysAgo(dateStr){
 }
 
 const DOW = {Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6};
+const DOW_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function todayAbbrev(){
+  return DOW_NAMES[new Date().getDay()];
+}
+
+// Today first, then forward chronologically, wrapping around so
+// yesterday ends up last. Only reorders for display — `week` itself
+// always stays keyed by day name, so selections aren't affected.
+function weekDisplayOrder(){
+  if(!rotateToToday) return DAYS;
+  const i = DAYS.indexOf(todayAbbrev());
+  return DAYS.slice(i).concat(DAYS.slice(0, i));
+}
 
 // Most recent date (today or earlier) that falls on the given weekday.
 function mostRecentDateForDay(dayAbbrev, base){
@@ -1241,7 +1279,8 @@ function renderWeek(){
     return;
   }
   const weekColors = assignWeekMealColors();
-  card.innerHTML = DAYS.map(d=>{
+  const today = todayAbbrev();
+  card.innerHTML = weekDisplayOrder().map(d=>{
     const selectedIds = week[d] || [];
     const selectedMeals = selectedIds.map(id=>meals.find(m=>m.id===id)).filter(Boolean);
     const isOpen = openDropdownDay === d;
@@ -1249,10 +1288,11 @@ function renderWeek(){
     const visibleMeals = query ? meals.filter(m=>m.name.toLowerCase().includes(query)) : meals;
     const markMadeOpen = openMarkMadeDay === d && selectedMeals.length>0;
     const markMadeDate = markMadeDateOverride[d] || defaultMarkMadeDate(d);
+    const isToday = d === today;
     return `
-      <div class="day-block">
+      <div class="day-block${isToday ? ' day-block-today' : ''}">
         <div class="day-heading-row">
-          <div class="day-heading">${d}</div>
+          <div class="day-heading">${d}${isToday ? '<span class="today-badge">Today</span>' : ''}</div>
           ${selectedMeals.length>0 ? `<button class="icon-only-btn mark-made-btn" onclick="toggleMarkMadeDay(event,'${d}')" title="Mark all of ${d}'s meals made">${ICON_CHECK}</button>` : ''}
         </div>
         <div class="multiselect">
@@ -2255,6 +2295,13 @@ document.getElementById('meal-sort').addEventListener('change', (e)=>{
   mealSort = e.target.value;
   localStorage.setItem('mealRotation.mealSort', mealSort);
   renderMeals();
+});
+
+document.getElementById('rotate-to-today-toggle').checked = rotateToToday;
+document.getElementById('rotate-to-today-toggle').addEventListener('change', (e)=>{
+  rotateToToday = e.target.checked;
+  localStorage.setItem('mealRotation.rotateToToday', rotateToToday);
+  renderWeek();
 });
 
 loadAll();
