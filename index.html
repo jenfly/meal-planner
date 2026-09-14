@@ -473,10 +473,48 @@
   }
   .drag-handle:active{cursor:grabbing;}
   .shop-item.dragging .drag-handle{cursor:grabbing;color:var(--sage-deep);}
+  .shop-item-info{
+    flex:1;
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+  }
+  .shop-item-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
   .shop-source{
     font-size:12px;
     color:var(--ink-faint);
     margin-left:auto;
+  }
+  .shop-note-btn{
+    flex-shrink:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:none;
+    border:none;
+    padding:2px;
+    color:var(--ink-faint);
+    cursor:pointer;
+  }
+  .shop-note-btn:hover{color:var(--sage-deep);}
+  .shop-note-btn svg{width:12px;height:12px;display:block;}
+  .shop-note{
+    font-size:12px;
+    color:var(--ink-faint);
+  }
+  .shop-item.checked .shop-note{
+    text-decoration:line-through;
+  }
+  .shop-note-input{
+    font-size:12px;
+    padding:4px 8px;
+    margin-bottom:0;
+    border-radius:6px;
   }
   .batch-card{
     display:flex;
@@ -658,6 +696,8 @@ let daySearch = {};
 let shopExtras = [];
 let shopChecked = {};
 let shopOrder = [];
+let shopNotes = {};
+let editingShopNoteId = null;
 let batchOrder = [];
 let batchChecked = {};
 let rotateToToday = localStorage.getItem('mealRotation.rotateToToday') !== 'false';
@@ -913,6 +953,8 @@ function loadAll(){
   catch(e){ shopChecked = {}; }
   try{ shopOrder = JSON.parse(localStorage.getItem(STORAGE_PREFIX+'shopOrder')) || []; }
   catch(e){ shopOrder = []; }
+  try{ shopNotes = JSON.parse(localStorage.getItem(STORAGE_PREFIX+'shopNotes')) || {}; }
+  catch(e){ shopNotes = {}; }
   try{ batchOrder = JSON.parse(localStorage.getItem(STORAGE_PREFIX+'batchOrder')) || []; }
   catch(e){ batchOrder = []; }
   try{ batchChecked = JSON.parse(localStorage.getItem(STORAGE_PREFIX+'batchChecked')) || {}; }
@@ -934,6 +976,9 @@ function saveShopExtras(){
 }
 function saveShopChecked(){
   localStorage.setItem(STORAGE_PREFIX+'shopChecked', JSON.stringify(shopChecked));
+}
+function saveShopNotes(){
+  localStorage.setItem(STORAGE_PREFIX+'shopNotes', JSON.stringify(shopNotes));
 }
 function saveShopOrder(){
   localStorage.setItem(STORAGE_PREFIX+'shopOrder', JSON.stringify(shopOrder));
@@ -1797,12 +1842,22 @@ function renderShop(){
   box.innerHTML = orderedIds.map(id=>{
     const r = rowsById[id];
     const isChecked = !!shopChecked[id];
+    const note = shopNotes[id] || '';
+    const isEditingNote = editingShopNoteId === id;
     return `
     <div class="shop-item ${isChecked?'checked':''}" data-id="${encodeURIComponent(id)}" data-checked="${isChecked?'1':'0'}">
       <span class="drag-handle" title="Drag to reorder">${ICON_GRIP}</span>
       <input type="checkbox" ${isChecked?'checked':''} onchange="toggleCheck('${id}')">
-      <span>${escapeHtml(r.label)}</span>
-      <span class="shop-source">${escapeHtml(r.source)}</span>
+      <div class="shop-item-info">
+        <div class="shop-item-row">
+          <span>${escapeHtml(r.label)}</span>
+          <span class="shop-source">${escapeHtml(r.source)}</span>
+          <button class="shop-note-btn" onclick="toggleShopNoteEdit(event,'${id}')" title="${note?'Edit note':'Add note'}">${ICON_PEN}</button>
+        </div>
+        ${isEditingNote
+          ? `<input type="text" class="shop-note-input" id="shop-note-input-${id}" value="${escapeHtml(note)}" placeholder="Add a note" maxlength="140" onkeydown="if(event.key==='Enter')this.blur();" onblur="saveShopNote('${id}')">`
+          : (note ? `<div class="shop-note">${escapeHtml(note)}</div>` : '')}
+      </div>
     </div>`;
   }).join('');
 
@@ -1812,6 +1867,27 @@ function renderShop(){
 window.toggleCheck = async function(id){
   shopChecked[id] = !shopChecked[id];
   await saveShopChecked();
+  renderShop();
+}
+
+window.toggleShopNoteEdit = function(e, id){
+  e.stopPropagation();
+  editingShopNoteId = editingShopNoteId === id ? null : id;
+  renderShop();
+  if(editingShopNoteId === id){
+    const inp = document.getElementById('shop-note-input-'+id);
+    if(inp){ inp.focus(); inp.select(); }
+  }
+}
+
+window.saveShopNote = async function(id){
+  const inp = document.getElementById('shop-note-input-'+id);
+  if(!inp) return;
+  const val = inp.value.trim();
+  if(val) shopNotes[id] = val;
+  else delete shopNotes[id];
+  editingShopNoteId = null;
+  await saveShopNotes();
   renderShop();
 }
 
