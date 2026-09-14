@@ -439,10 +439,8 @@
     padding:30px 10px;
   }
   .shop-item{
-    display:flex;
-    align-items:center;
-    gap:10px;
-    padding:9px 0;
+    position:relative;
+    overflow:hidden;
     border-bottom:1px solid var(--line);
     font-size:15px;
   }
@@ -453,6 +451,7 @@
   }
   .shop-item.dragging{
     position:relative;
+    overflow:visible;
     z-index:50;
     background:var(--card);
     box-shadow:0 6px 16px rgba(0,0,0,0.14);
@@ -461,6 +460,34 @@
   .shop-item.shift-anim{
     transition:transform 150ms ease;
   }
+  .shop-item-content{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:9px 0;
+    background:var(--card);
+    position:relative;
+    z-index:1;
+    touch-action:pan-y;
+  }
+  .shop-item-delete-bg{
+    position:absolute;
+    top:0;
+    right:0;
+    bottom:0;
+    width:72px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:2px;
+    background:var(--clay);
+    color:#fff;
+    font-size:11px;
+    font-weight:600;
+    cursor:pointer;
+  }
+  .shop-item-delete-bg svg{width:15px;height:15px;display:block;}
   .drag-handle{
     display:flex;
     align-items:center;
@@ -1866,23 +1893,27 @@ function renderShop(){
     const note = shopNotes[id] || '';
     const isEditingNote = editingShopNoteId === id;
     return `
-    <div class="shop-item ${isChecked?'checked':''}" data-id="${encodeURIComponent(id)}" data-checked="${isChecked?'1':'0'}">
-      <span class="drag-handle" title="Drag to reorder">${ICON_GRIP}</span>
-      <input type="checkbox" ${isChecked?'checked':''} onchange="toggleCheck('${id}')">
-      <div class="shop-item-info">
-        <div class="shop-item-row">
-          <span>${escapeHtml(r.label)}</span>
-          <span class="shop-source">${escapeHtml(r.source)}</span>
-          <button class="shop-note-btn" onclick="toggleShopNoteEdit(event,'${id}')" title="${note?'Edit note':'Add note'}">${ICON_PEN}</button>
+    <div class="shop-item ${isChecked?'checked':''}" data-id="${encodeURIComponent(id)}" data-checked="${isChecked?'1':'0'}" data-manual="${r.manual?'1':'0'}">
+      ${r.manual ? `<div class="shop-item-delete-bg" onclick="deleteShopExtra('${id}')">${ICON_TRASH} Delete</div>` : ''}
+      <div class="shop-item-content">
+        <span class="drag-handle" title="Drag to reorder">${ICON_GRIP}</span>
+        <input type="checkbox" ${isChecked?'checked':''} onchange="toggleCheck('${id}')">
+        <div class="shop-item-info">
+          <div class="shop-item-row">
+            <span>${escapeHtml(r.label)}</span>
+            <span class="shop-source">${escapeHtml(r.source)}</span>
+            <button class="shop-note-btn" onclick="toggleShopNoteEdit(event,'${id}')" title="${note?'Edit note':'Add note'}">${ICON_PEN}</button>
+          </div>
+          ${isEditingNote
+            ? `<input type="text" class="shop-note-input" id="shop-note-input-${id}" value="${escapeHtml(note)}" placeholder="Add a note" maxlength="140" onkeydown="if(event.key==='Enter')this.blur();" onblur="saveShopNote('${id}')">`
+            : (note ? `<div class="shop-note">${escapeHtml(note)}</div>` : '')}
         </div>
-        ${isEditingNote
-          ? `<input type="text" class="shop-note-input" id="shop-note-input-${id}" value="${escapeHtml(note)}" placeholder="Add a note" maxlength="140" onkeydown="if(event.key==='Enter')this.blur();" onblur="saveShopNote('${id}')">`
-          : (note ? `<div class="shop-note">${escapeHtml(note)}</div>` : '')}
       </div>
     </div>`;
   }).join('');
 
   attachShopDragHandlers();
+  attachShopSwipeHandlers();
 }
 
 window.toggleCheck = async function(id){
@@ -1916,6 +1947,81 @@ function attachShopDragHandlers(){
   document.querySelectorAll('#shop-list .shop-item').forEach(rowEl=>{
     const handle = rowEl.querySelector('.drag-handle');
     if(handle) handle.onpointerdown = (e)=> beginShopDrag(e, rowEl);
+  });
+}
+
+const SHOP_SWIPE_REVEAL = 72;
+
+function closeShopSwipes(exceptRowEl){
+  document.querySelectorAll('#shop-list .shop-item-content.swiped-open').forEach(content=>{
+    if(exceptRowEl && content.closest('.shop-item')===exceptRowEl) return;
+    content.classList.remove('swiped-open');
+    content.style.transform = '';
+  });
+}
+
+function attachShopSwipeHandlers(){
+  document.querySelectorAll('#shop-list .shop-item[data-manual="1"]').forEach(rowEl=>{
+    const content = rowEl.querySelector('.shop-item-content');
+    if(!content) return;
+    let startX=0, startY=0, active=false, determined=false, horizontal=false, baseOffset=0, moved=false;
+
+    content.onpointerdown = (e)=>{
+      if(e.target.closest('.drag-handle')) return;
+      startX = e.clientX; startY = e.clientY;
+      active = true; determined = false; horizontal = false; moved = false;
+      baseOffset = content.classList.contains('swiped-open') ? -SHOP_SWIPE_REVEAL : 0;
+    };
+
+    content.onpointermove = (e)=>{
+      if(!active) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if(!determined){
+        if(Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+        determined = true;
+        horizontal = Math.abs(dx) > Math.abs(dy);
+        if(horizontal){
+          closeShopSwipes(rowEl);
+          try{ content.setPointerCapture(e.pointerId); }catch(err){}
+        }
+      }
+      if(!horizontal) return;
+      moved = true;
+      e.preventDefault();
+      content.style.transition = 'none';
+      const offset = Math.min(0, Math.max(-SHOP_SWIPE_REVEAL, baseOffset + dx));
+      content.style.transform = `translateX(${offset}px)`;
+    };
+
+    const finish = (e)=>{
+      if(!active) return;
+      active = false;
+      content.style.transition = '';
+      try{ content.releasePointerCapture(e.pointerId); }catch(err){}
+      if(!horizontal) return;
+      const dx = e.clientX - startX;
+      const finalOffset = Math.min(0, Math.max(-SHOP_SWIPE_REVEAL, baseOffset + dx));
+      if(finalOffset <= -SHOP_SWIPE_REVEAL/2){
+        content.style.transform = `translateX(${-SHOP_SWIPE_REVEAL}px)`;
+        content.classList.add('swiped-open');
+      } else {
+        content.style.transform = '';
+        content.classList.remove('swiped-open');
+      }
+    };
+    content.onpointerup = finish;
+    content.onpointercancel = finish;
+
+    content.addEventListener('click', (e)=>{
+      if(moved){
+        e.preventDefault(); e.stopPropagation(); moved = false;
+      } else if(content.classList.contains('swiped-open')){
+        e.preventDefault(); e.stopPropagation();
+        content.classList.remove('swiped-open');
+        content.style.transform = '';
+      }
+    }, true);
   });
 }
 
@@ -2181,6 +2287,10 @@ async function finalizeBatchOrder(){
   await saveBatchOrder();
 }
 
+document.getElementById('shop-list').addEventListener('pointerdown', (e)=>{
+  closeShopSwipes(e.target.closest('.shop-item'));
+}, true);
+
 document.getElementById('add-extra').addEventListener('click', async ()=>{
   const inp = document.getElementById('extra-item');
   const val = inp.value.trim();
@@ -2190,6 +2300,19 @@ document.getElementById('add-extra').addEventListener('click', async ()=>{
   await saveShopExtras();
   renderShop();
 });
+
+window.deleteShopExtra = async function(id){
+  const exId = id.slice(2);
+  shopExtras = shopExtras.filter(x=>x.id!==exId);
+  delete shopChecked[id];
+  delete shopNotes[id];
+  shopOrder = shopOrder.filter(x=>x!==id);
+  await saveShopExtras();
+  await saveShopChecked();
+  await saveShopNotes();
+  await saveShopOrder();
+  renderShop();
+}
 
 /* One-time setup: see README "Setting up Google Drive backup".
    Uses drive.file scope (access limited to this app's own backup file). */
