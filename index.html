@@ -1674,7 +1674,12 @@ window.setWeekMealSort = function(value){
 window.toggleDayMeal = async function(day, mealId){
   if(!week[day]) week[day] = [];
   const idx = week[day].indexOf(mealId);
-  if(idx>=0) week[day].splice(idx,1); else week[day].push(mealId);
+  if(idx>=0){
+    week[day].splice(idx,1);
+  } else {
+    week[day].push(mealId);
+    uncheckShopItemsForMeal(meals.find(m=>m.id===mealId));
+  }
   if(week[day].length===0) delete week[day];
   await saveWeek();
   renderShop();
@@ -1781,6 +1786,22 @@ document.getElementById('clear-week').addEventListener('click', async ()=>{
 function capitalizeFirst(s){
   if(!s) return s;
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// Called whenever a meal is newly assigned to a day. If any of its items are
+// already checked off on the shopping list, uncheck them so buying it again
+// for the new day isn't missed.
+function uncheckShopItemsForMeal(meal){
+  if(!meal) return;
+  let changed = false;
+  (meal.items||[]).forEach(item=>{
+    const id = 'g_'+item.toLowerCase();
+    if(shopChecked[id]){
+      shopChecked[id] = false;
+      changed = true;
+    }
+  });
+  if(changed) saveShopChecked();
 }
 
 function renderShop(){
