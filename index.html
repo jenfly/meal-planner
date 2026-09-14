@@ -2157,6 +2157,17 @@ function renderBatch(){
   });
   if(orderChanged) saveBatchOrder();
 
+  // Drop checked state for meals no longer planned this week, so re-adding
+  // a meal in a future week starts it unchecked.
+  let checkedChanged = false;
+  Object.keys(batchChecked).forEach(id=>{
+    if(!validIds.has(id)){
+      delete batchChecked[id];
+      checkedChanged = true;
+    }
+  });
+  if(checkedChanged) saveBatchChecked();
+
   if(batchOrder.length===0){
     box.innerHTML = '<div class="empty">No meals tagged "batch cook" are planned this week.</div>';
     return;
