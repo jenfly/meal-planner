@@ -403,10 +403,37 @@
     align-items:center;
     gap:6px;
   }
-  .multiselect-search-row input.multiselect-search{
+  .multiselect-search-row .search-input-wrap{
     flex:1;
     min-width:0;
   }
+  .search-input-wrap{
+    position:relative;
+    width:100%;
+  }
+  .search-input-wrap input{
+    padding-right:28px;
+    margin-bottom:0;
+  }
+  #meals-filter-wrap .search-input-wrap{
+    margin-bottom:10px;
+  }
+  .search-clear-btn{
+    position:absolute;
+    right:6px;
+    top:50%;
+    transform:translateY(-50%);
+    width:18px;
+    height:18px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:50%;
+    font-size:12px;
+    color:var(--ink-faint);
+    cursor:pointer;
+  }
+  .search-clear-btn:hover{color:var(--clay);background:rgba(0,0,0,0.05);}
   select.multiselect-sort{
     width:auto;
     flex:none;
@@ -865,7 +892,10 @@ function categoryFieldInnerHtml(formKey){
       ${isOpen ? `
         <div class="multiselect-panel">
           <div class="multiselect-search-wrap">
-            <input type="text" class="multiselect-search" data-role="category-search" placeholder="Search or add a category" value="${escapeAttr(categoryPickerSearch)}">
+            <div class="search-input-wrap">
+              <input type="text" class="multiselect-search" data-role="category-search" placeholder="Search or add a category" value="${escapeAttr(categoryPickerSearch)}">
+              ${categoryPickerSearch ? `<span class="search-clear-btn" data-role="category-search-clear" title="Clear search">✕</span>` : ''}
+            </div>
           </div>
           ${options.length===0
             ? (query ? '' : `<div class="multiselect-no-match">${allCategories().length===0 ? 'No categories yet — type below to add one.' : 'All existing categories are already added.'}</div>`)
@@ -939,6 +969,14 @@ function attachCategoryPickerHandlers(root){
     searchInput.focus();
     const v = searchInput.value;
     searchInput.setSelectionRange(v.length, v.length);
+  }
+  const clearBtn = wrap.querySelector('[data-role="category-search-clear"]');
+  if(clearBtn){
+    clearBtn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      categoryPickerSearch = '';
+      renderCategoryField(formKey);
+    });
   }
   wrap.querySelectorAll('[data-role="category-add"]').forEach(cb=>{
     cb.addEventListener('change', ()=>{
@@ -1117,7 +1155,10 @@ function renderMealsFilterBar(){
   const selStart = searchWasFocused ? document.activeElement.selectionStart : null;
   const selEnd = searchWasFocused ? document.activeElement.selectionEnd : null;
   wrap.innerHTML = `
-    <input type="text" id="meal-search" placeholder="Search by name, parts, or ingredients" value="${escapeAttr(mealSearchQuery)}">
+    <div class="search-input-wrap">
+      <input type="text" id="meal-search" placeholder="Search by name, parts, or ingredients" value="${escapeAttr(mealSearchQuery)}">
+      ${mealSearchQuery ? `<span class="search-clear-btn" id="meal-search-clear" title="Clear search">✕</span>` : ''}
+    </div>
     ${cats.length>0 ? `
       <div class="category-filter-row">
         <span class="pill filter-pill ${mealCategoryFilter.length===0?'filter-pill-active':''}" data-role="cat-filter-all">All</span>
@@ -1137,6 +1178,15 @@ function renderMealsFilterBar(){
   if(searchWasFocused){
     input.focus();
     input.setSelectionRange(selStart, selEnd);
+  }
+  const mealSearchClearBtn = document.getElementById('meal-search-clear');
+  if(mealSearchClearBtn){
+    mealSearchClearBtn.addEventListener('click', ()=>{
+      mealSearchQuery = '';
+      renderMeals();
+      const freshInput = document.getElementById('meal-search');
+      if(freshInput) freshInput.focus();
+    });
   }
   wrap.querySelectorAll('[data-role="cat-filter-all"]').forEach(el=>{
     el.addEventListener('click', ()=>{
@@ -1427,8 +1477,11 @@ function renderWeek(){
             <div class="multiselect-panel">
               <div class="multiselect-search-wrap">
                 <div class="multiselect-search-row">
-                  <input type="text" class="multiselect-search" data-day="${d}" placeholder="Search meals"
-                    value="${escapeHtml(daySearch[d]||'')}" oninput="setDaySearch('${d}', this.value)">
+                  <div class="search-input-wrap">
+                    <input type="text" class="multiselect-search" data-day="${d}" placeholder="Search meals"
+                      value="${escapeHtml(daySearch[d]||'')}" oninput="setDaySearch('${d}', this.value)">
+                    ${daySearch[d] ? `<span class="search-clear-btn" onclick="clearDaySearch(event,'${d}')" title="Clear search">✕</span>` : ''}
+                  </div>
                   <select class="multiselect-sort" title="Sort meals in this list" onchange="setWeekMealSort(this.value)">
                     <option value="name" ${weekMealSort==='name'?'selected':''}>Name</option>
                     <option value="due" ${weekMealSort==='due'?'selected':''}>Due (oldest first)</option>
@@ -1705,6 +1758,12 @@ window.toggleDropdown = function(day){
 
 window.setDaySearch = function(day, value){
   daySearch[day] = value;
+  renderWeek();
+}
+
+window.clearDaySearch = function(event, day){
+  event.stopPropagation();
+  daySearch[day] = '';
   renderWeek();
 }
 
