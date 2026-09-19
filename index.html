@@ -2424,6 +2424,19 @@ function mergeMeals(local, incoming){
   return { merged: Array.from(byId.values()), added, updated };
 }
 
+function mergeShopExtras(local, incoming){
+  const byId = new Map(local.map(x=>[x.id, x]));
+  incoming.forEach(ex=>{
+    if(!byId.has(ex.id)) byId.set(ex.id, ex);
+  });
+  return Array.from(byId.values());
+}
+
+function mergeShopNotes(local, incoming){
+  // Local notes win on conflict; any note-only-in-backup is added in.
+  return { ...incoming, ...local };
+}
+
 async function uploadBackup(token, jsonContent){
   const fileId = await findBackupFileId(token);
   if(fileId){
@@ -2474,7 +2487,7 @@ window.doBackup = async function(){
     await loadGis();
     const token = await getAccessToken();
     renderBackupMenu('Backing up…');
-    const content = JSON.stringify({ meals, exportedAt: new Date().toISOString() });
+    const content = JSON.stringify({ meals, shopExtras, shopNotes, exportedAt: new Date().toISOString() });
     await uploadBackup(token, content);
     localStorage.setItem(STORAGE_PREFIX+'lastBackup', new Date().toISOString());
     renderBackupMenu('Backed up just now.');
@@ -2507,6 +2520,14 @@ window.doRestore = async function(){
     if(!Array.isArray(data.meals)) throw new Error('invalid-backup');
     const { merged, added, updated } = mergeMeals(meals, data.meals);
     meals = merged;
+    if(Array.isArray(data.shopExtras)){
+      shopExtras = mergeShopExtras(shopExtras, data.shopExtras);
+      saveShopExtras();
+    }
+    if(data.shopNotes && typeof data.shopNotes === 'object'){
+      shopNotes = mergeShopNotes(shopNotes, data.shopNotes);
+      saveShopNotes();
+    }
     await saveMeals();
     renderMeals();
     renderWeek();
