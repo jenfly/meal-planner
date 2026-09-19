@@ -46,4 +46,19 @@ The "Back up your meals" feature (in the header menu, top right) saves just your
 Notes:
 - The app requests the `drive.file` scope, which only ever grants access to the one backup file it creates — never your whole Drive.
 - If you skip this setup, tapping "Back up now" will just tell you it isn't configured yet, rather than failing silently.
-- The backup menu nudges you if it's been 30+ days since your last backup, or if you've never backed up.
+
+## Adjusting or disabling the backup reminder
+
+If it's been too long since your last Google Drive backup (or you've never backed up), the app shows a banner right at the top of the screen as soon as it opens, plus a matching "stale" indicator on the backup pill in the header menu. Tapping "Back up now" on the banner backs up immediately; the `×` dismisses it until the next time you open the app.
+
+Both are controlled by two constants near the top of the `<script>` block in `index.html`, right above the Google Drive backup code:
+
+```js
+const BACKUP_REMINDER_DAYS = 60;
+const BACKUP_REMINDER_ALERT_ENABLED = true;
+```
+
+- `BACKUP_REMINDER_DAYS` — how many days may pass since the last backup before the reminder kicks in. Change `60` to whatever number you'd prefer.
+- `BACKUP_REMINDER_ALERT_ENABLED` — set to `false` to turn off the top-of-screen banner entirely. (The header menu's pill still quietly turns amber past `BACKUP_REMINDER_DAYS`, but nothing pops up on open.)
+
+Redeploy (push the updated `index.html`) after changing either value.
