@@ -2318,7 +2318,7 @@ document.getElementById('shop-list').addEventListener('pointerdown', (e)=>{
   closeShopSwipes(e.target.closest('.shop-item'));
 }, true);
 
-document.getElementById('add-extra').addEventListener('click', async ()=>{
+async function addShopExtraFromInput(){
   const inp = document.getElementById('extra-item');
   const val = inp.value.trim();
   if(!val) return;
@@ -2326,6 +2326,11 @@ document.getElementById('add-extra').addEventListener('click', async ()=>{
   inp.value = '';
   await saveShopExtras();
   renderShop();
+}
+
+document.getElementById('add-extra').addEventListener('click', addShopExtraFromInput);
+document.getElementById('extra-item').addEventListener('keydown', (e)=>{
+  if(e.key === 'Enter') addShopExtraFromInput();
 });
 
 window.deleteShopExtra = async function(id){
