@@ -25,6 +25,12 @@ python3 -m http.server 8000
 
 To test Google Drive backup locally, add `http://localhost:8000` as an extra Authorized JavaScript origin on the same OAuth client (see below) — production and local can share one client ID.
 
+## Linking to Well Tended
+
+Checking off an item on the Batch cook tab still works exactly as before, and now also opens Well Tended at `?log=<meal name>` so you can log "Make <meal>" there (or cancel if it's the same batch re-listed). Unchecking does nothing extra.
+
+The address lives in the `WELL_TENDED_URL` constant next to `toggleBatchCooked` in `index.html`; set it to `''` to turn the link off. Which Well Tended category receives the item is chosen in Well Tended's own Settings.
+
 ## Setting up Google Drive backup
 
 The "Back up your meals" feature (in the header menu, top right) saves just your meal list — not your weekly plan — to a file in your Google Drive. It needs a one-time setup before it will work:

@@ -2268,10 +2268,30 @@ function renderBatch(){
   attachBatchDragHandlers();
 }
 
+// Where Well Tended lives. Checking off a batch-cook item opens it with ?log=<meal name> so you can
+// log "Make <meal>" there (or cancel if it's the same batch). Set to '' to turn this link off.
+const WELL_TENDED_URL = 'https://jenfly.github.io/wellness-balance-app/';
+
+function openWellTendedLog(mealName){
+  if(!WELL_TENDED_URL || !mealName) return;
+  const a = document.createElement('a');
+  a.href = WELL_TENDED_URL + '?log=' + encodeURIComponent(mealName);
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 window.toggleBatchCooked = async function(id){
   batchChecked[id] = !batchChecked[id];
   await saveBatchChecked();
   renderBatch();
+  // Checking off always works as before; it additionally offers to log it in Well Tended.
+  // Unchecking does nothing extra.
+  if(batchChecked[id]){
+    const m = meals.find(x=>x.id===id);
+    if(m) openWellTendedLog(m.name);
+  }
 }
 
 function attachBatchDragHandlers(){
