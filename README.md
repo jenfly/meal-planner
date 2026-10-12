@@ -4,7 +4,7 @@ A small PWA for planning meal combos, a weekly rotation, and the shopping list t
 
 ## Deploying
 
-1. Push all the files in this folder (`index.html`, `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`) to a GitHub repo, or drag the folder onto https://app.netlify.com/drop.
+1. Push all the files in this folder (`index.html`, `sync.js`, `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`) to a GitHub repo, or drag the folder onto https://app.netlify.com/drop.
 2. If using GitHub, enable GitHub Pages in the repo's Settings (source: root of `main`).
 3. Visit the resulting URL on your phone, then:
    - iPhone: Share button → "Add to Home Screen"
@@ -52,6 +52,15 @@ The "Back up your meals" feature (in the header menu, top right) saves just your
 Notes:
 - The app requests the `drive.file` scope, which only ever grants access to the one backup file it creates — never your whole Drive.
 - If you skip this setup, tapping "Back up now" will just tell you it isn't configured yet, rather than failing silently.
+
+## Cloud sync
+
+Optional, and separate from the Google Drive backup above. Tap the ⋯ menu (top right) → "Sign in with Google" under "Sync across devices" to keep your meals, weekly plan, and shopping list synced automatically between your phone and computer through a shared Supabase backend (the same one used by Well Tended and the journal app — one sign-in covers all three, since they share this origin).
+
+- Everything still lives in `localStorage` first and the app works offline exactly as before; sync just pushes changes up and pulls changes made elsewhere in the background.
+- The first time a device signs in and finds a different cloud copy already there, you'll be asked whether to keep this device's data or the cloud's — the one you don't pick is saved once on this device as a backup.
+- Signing out affects all three apps, since they share one sign-in.
+- The existing Google Drive backup above still works independently and is worth keeping as a safety net.
 
 ## Adjusting or disabling the backup reminder
 

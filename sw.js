@@ -1,7 +1,8 @@
-const CACHE_NAME = 'meal-planner-v34';
+const CACHE_NAME = 'meal-planner-v35';
 const FILES_TO_CACHE = [
   './',
   './index.html',
+  './sync.js',
   './manifest.json',
   './icon-192.png',
   './icon-512.png'

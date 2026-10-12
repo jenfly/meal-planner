@@ -700,6 +700,7 @@
   <div class="header-menu">
     <button class="header-menu-btn" onclick="toggleHeaderMenu(event)" aria-label="Backup menu">⋯</button>
     <div id="header-menu-panel" class="header-menu-panel">
+      <div id="sync-menu-content"></div>
       <div id="backup-menu-content"></div>
     </div>
   </div>
@@ -756,6 +757,7 @@
   <div id="meals-list"></div>
 </div>
 
+<script src="sync.js"></script>
 <script>
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 let meals = [];
@@ -1014,21 +1016,29 @@ function uid(){ return 'm_' + Math.random().toString(36).slice(2,9); }
 
 const STORAGE_PREFIX = 'mealRotation.';
 
+// normalize week[day] to an array (older saved shapes stored it as an object)
+function normalizeWeek(raw){
+  const w = raw && typeof raw === 'object' ? raw : {};
+  Object.keys(w).forEach(d=>{
+    if(!Array.isArray(w[d])){
+      w[d] = Object.values(w[d]).filter(Boolean);
+    }
+  });
+  return w;
+}
+// normalize shopExtras entries to {id, label} objects (older saved shapes stored plain strings)
+function normalizeShopExtras(raw){
+  const list = Array.isArray(raw) ? raw : [];
+  return list.map(x => typeof x === 'string' ? { id: uid(), label: x } : x);
+}
+
 function loadAll(){
   try{ meals = JSON.parse(localStorage.getItem(STORAGE_PREFIX+'meals')) || []; }
   catch(e){ meals = []; }
-  try{ week = JSON.parse(localStorage.getItem(STORAGE_PREFIX+'week')) || {}; }
+  try{ week = normalizeWeek(JSON.parse(localStorage.getItem(STORAGE_PREFIX+'week')) || {}); }
   catch(e){ week = {}; }
-  // normalize week[day] to an array
-  Object.keys(week).forEach(d=>{
-    if(!Array.isArray(week[d])){
-      week[d] = Object.values(week[d]).filter(Boolean);
-    }
-  });
-  try{
-    const rawExtras = JSON.parse(localStorage.getItem(STORAGE_PREFIX+'shopExtras')) || [];
-    shopExtras = rawExtras.map(x => typeof x === 'string' ? { id: uid(), label: x } : x);
-  }catch(e){ shopExtras = []; }
+  try{ shopExtras = normalizeShopExtras(JSON.parse(localStorage.getItem(STORAGE_PREFIX+'shopExtras')) || []); }
+  catch(e){ shopExtras = []; }
   try{ shopChecked = JSON.parse(localStorage.getItem(STORAGE_PREFIX+'shopChecked')) || {}; }
   catch(e){ shopChecked = {}; }
   try{ shopOrder = JSON.parse(localStorage.getItem(STORAGE_PREFIX+'shopOrder')) || []; }
@@ -1046,29 +1056,68 @@ function loadAll(){
   renderBackupAlert();
 }
 
+// Applies a whole-state doc pulled from Supabase sync (see sync.js). Mirrors loadAll()'s
+// defaulting/normalization, but from an in-memory object rather than localStorage JSON.
+function applyState(doc){
+  meals = Array.isArray(doc.meals) ? doc.meals : [];
+  week = normalizeWeek(doc.week);
+  shopExtras = normalizeShopExtras(doc.shopExtras);
+  shopChecked = (doc.shopChecked && typeof doc.shopChecked === 'object') ? doc.shopChecked : {};
+  shopOrder = Array.isArray(doc.shopOrder) ? doc.shopOrder : [];
+  shopNotes = (doc.shopNotes && typeof doc.shopNotes === 'object') ? doc.shopNotes : {};
+  batchOrder = Array.isArray(doc.batchOrder) ? doc.batchOrder : [];
+  batchChecked = (doc.batchChecked && typeof doc.batchChecked === 'object') ? doc.batchChecked : {};
+  saveMeals(); saveWeek(); saveShopExtras(); saveShopChecked();
+  saveShopOrder(); saveShopNotes(); saveBatchOrder(); saveBatchChecked();
+  renderMeals();
+  renderWeek();
+  renderShop();
+  renderBatch();
+  renderBackupAlert();
+}
+
+// True while the user is mid-edit somewhere a sync pull would clobber (typing in a form,
+// editing a shopping-list note, mid-drag) — the pull is deferred a moment instead.
+function syncBusy(){
+  const formWrap = document.getElementById('add-form-wrap');
+  return !!(formWrap && formWrap.innerHTML.trim())
+    || editingId !== null
+    || editingShopNoteId !== null
+    || categoryPickerOpen
+    || !!document.querySelector('.dragging');
+}
+
 function saveMeals(){
   localStorage.setItem(STORAGE_PREFIX+'meals', JSON.stringify(meals));
+  if(window.Sync) Sync.noteLocalChange();
 }
 function saveWeek(){
   localStorage.setItem(STORAGE_PREFIX+'week', JSON.stringify(week));
+  if(window.Sync) Sync.noteLocalChange();
 }
 function saveShopExtras(){
   localStorage.setItem(STORAGE_PREFIX+'shopExtras', JSON.stringify(shopExtras));
+  if(window.Sync) Sync.noteLocalChange();
 }
 function saveShopChecked(){
   localStorage.setItem(STORAGE_PREFIX+'shopChecked', JSON.stringify(shopChecked));
+  if(window.Sync) Sync.noteLocalChange();
 }
 function saveShopNotes(){
   localStorage.setItem(STORAGE_PREFIX+'shopNotes', JSON.stringify(shopNotes));
+  if(window.Sync) Sync.noteLocalChange();
 }
 function saveShopOrder(){
   localStorage.setItem(STORAGE_PREFIX+'shopOrder', JSON.stringify(shopOrder));
+  if(window.Sync) Sync.noteLocalChange();
 }
 function saveBatchOrder(){
   localStorage.setItem(STORAGE_PREFIX+'batchOrder', JSON.stringify(batchOrder));
+  if(window.Sync) Sync.noteLocalChange();
 }
 function saveBatchChecked(){
   localStorage.setItem(STORAGE_PREFIX+'batchChecked', JSON.stringify(batchChecked));
+  if(window.Sync) Sync.noteLocalChange();
 }
 
 document.querySelectorAll('.tab').forEach(t=>{
@@ -2678,6 +2727,54 @@ window.dismissBackupAlert = function(){
   if(el) el.style.display = 'none';
 }
 
+function syncStatusText(st){
+  if(st.error) return 'Sync error — will retry.';
+  if(st.phase === 'offline') return "Offline — will sync when you're back online.";
+  if(st.phase === 'syncing' || st.phase === 'signing-in') return 'Syncing…';
+  if(!st.syncedAt) return st.dirty ? 'Not synced yet.' : 'Synced.';
+  const mins = Math.max(0, Math.round((Date.now() - st.syncedAt) / 60000));
+  if(mins < 1) return 'Synced just now.';
+  if(mins < 60) return `Synced ${mins}m ago.`;
+  const hrs = Math.round(mins / 60);
+  return hrs < 24 ? `Synced ${hrs}h ago.` : `Synced ${Math.round(hrs/24)}d ago.`;
+}
+
+function renderSyncMenu(statusOverride){
+  const el = document.getElementById('sync-menu-content');
+  if(!el || !window.Sync) return;
+  const st = statusOverride || Sync.status();
+  if(st.choice){
+    el.innerHTML = `
+      <div style="font-size:13px;color:var(--ink-soft);margin-bottom:8px;">This device and your cloud copy differ. Which one should win?</div>
+      <div style="font-size:12px;color:var(--ink-faint);margin-bottom:10px;">Cloud: ${st.choice.meals} meals, ${st.choice.weekSlots} planned this week.</div>
+      <button class="btn-primary" style="width:100%;margin-bottom:8px;" onclick="Sync.resolveChoice('cloud')">Use cloud copy</button>
+      <button class="btn-ghost" style="width:100%;" onclick="Sync.resolveChoice('device')">Keep this device's copy</button>
+      <div style="font-size:12px;color:var(--ink-faint);margin-top:8px;">Whichever you don't pick is saved once on this device as a backup.</div>
+    `;
+    return;
+  }
+  if(!st.signedIn){
+    el.innerHTML = `
+      <div style="font-size:13px;color:var(--ink-soft);margin-bottom:10px;">Sync your meals and plan across devices.</div>
+      <button class="btn-primary" style="width:100%;" onclick="Sync.signIn()">Sign in with Google</button>
+    `;
+    return;
+  }
+  el.innerHTML = `
+    <div style="font-size:13px;color:var(--ink-soft);margin-bottom:4px;">${escapeHtml(st.email||'')}</div>
+    <div style="font-size:12px;color:var(--ink-faint);margin-bottom:10px;">${syncStatusText(st)}</div>
+    <button class="btn-primary" style="width:100%;" onclick="Sync.syncNow()">Sync now</button>
+    <button class="btn-ghost" style="margin-top:8px;" onclick="syncSignOut()">Sign out</button>
+    <div style="font-size:11px;color:var(--ink-faint);margin-top:8px;">Signs you out of sync in Well Tended and the journal too — they share one sign-in.</div>
+  `;
+}
+
+window.syncSignOut = function(){
+  if(window.Sync) Sync.signOut();
+  renderSyncMenu();
+  showToast('Signed out of sync.', 'success');
+}
+
 function renderBackupMenu(statusOverride){
   const el = document.getElementById('backup-menu-content');
   if(!el) return;
@@ -2704,7 +2801,17 @@ window.toggleHeaderMenu = function(event){
   headerMenuOpen = !headerMenuOpen;
   const panel = document.getElementById('header-menu-panel');
   if(panel) panel.classList.toggle('open', headerMenuOpen);
-  if(headerMenuOpen) renderBackupMenu();
+  if(headerMenuOpen){ renderSyncMenu(); renderBackupMenu(); }
+}
+
+function onSyncChange(status){
+  if(headerMenuOpen) renderSyncMenu(status);
+  else if(status.phase === 'choose'){
+    headerMenuOpen = true;
+    const panel = document.getElementById('header-menu-panel');
+    if(panel) panel.classList.add('open');
+    renderSyncMenu(status);
+  }
 }
 
 document.addEventListener('click', (e)=>{
@@ -2730,6 +2837,18 @@ document.getElementById('rotate-to-today-toggle').addEventListener('change', (e)
 });
 
 loadAll();
+
+if(window.Sync){
+  Sync.init({
+    key: 'mealRotation',
+    getState: () => ({ meals, week, shopExtras, shopChecked, shopOrder, shopNotes, batchOrder, batchChecked }),
+    applyState: applyState,
+    busy: syncBusy,
+    onChange: onSyncChange,
+    onError: (msg) => showToast(msg, 'error'),
+    onPulled: () => {}
+  });
+}
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
