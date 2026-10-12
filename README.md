@@ -52,6 +52,7 @@ The "Back up your meals" feature (in the header menu, top right) saves just your
 Notes:
 - The app requests the `drive.file` scope, which only ever grants access to the one backup file it creates — never your whole Drive.
 - If you skip this setup, tapping "Back up now" will just tell you it isn't configured yet, rather than failing silently.
+- This is a one-way, manual backup — there's no in-app restore. If you ever need the file back, it's `meal-rotation-backup.json` in your Google Drive and can be opened/restored by hand.
 
 ## Cloud sync
 
@@ -61,19 +62,3 @@ Optional, and separate from the Google Drive backup above. Tap the ⋯ menu (top
 - The first time a device signs in and finds a different cloud copy already there, you'll be asked whether to keep this device's data or the cloud's — the one you don't pick is saved once on this device as a backup.
 - Signing out affects all three apps, since they share one sign-in.
 - The existing Google Drive backup above still works independently and is worth keeping as a safety net.
-
-## Adjusting or disabling the backup reminder
-
-If it's been too long since your last Google Drive backup (or you've never backed up), the app shows a banner right at the top of the screen as soon as it opens, plus a matching "stale" indicator on the backup pill in the header menu. Tapping "Back up now" on the banner backs up immediately; the `×` dismisses it until the next time you open the app.
-
-Both are controlled by two constants near the top of the `<script>` block in `index.html`, right above the Google Drive backup code:
-
-```js
-const BACKUP_REMINDER_DAYS = 60;
-const BACKUP_REMINDER_ALERT_ENABLED = true;
-```
-
-- `BACKUP_REMINDER_DAYS` — how many days may pass since the last backup before the reminder kicks in. Change `60` to whatever number you'd prefer.
-- `BACKUP_REMINDER_ALERT_ENABLED` — set to `false` to turn off the top-of-screen banner entirely. (The header menu's pill still quietly turns amber past `BACKUP_REMINDER_DAYS`, but nothing pops up on open.)
-
-Redeploy (push the updated `index.html`) after changing either value.

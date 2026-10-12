@@ -147,19 +147,6 @@
     flex-shrink:0;
   }
   .pill.stale{background:var(--mustard-wash);color:var(--mustard);}
-  .backup-alert{
-    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-    background:var(--mustard-wash);color:var(--mustard);
-    border:1px solid var(--mustard);border-radius:var(--radius);
-    padding:10px 12px;margin-bottom:14px;font-size:13px;
-  }
-  .backup-alert-text{flex:1 1 auto;min-width:180px;}
-  .backup-alert button.btn-primary{padding:6px 12px;font-size:13px;}
-  .backup-alert-dismiss{
-    background:none;border:none;color:inherit;opacity:0.6;cursor:pointer;
-    font-size:16px;line-height:1;padding:2px 4px;flex-shrink:0;
-  }
-  .backup-alert-dismiss:hover{opacity:1;}
   .row{display:flex;gap:8px;align-items:center;}
   .row-actions{display:flex;gap:6px;}
   button.icon-btn{
@@ -693,8 +680,6 @@
 
 <div class="toast-container" id="toast-container"></div>
 
-<div id="backup-alert" class="backup-alert" style="display:none;"></div>
-
 <div class="app-header">
   <h1>Meal Planner</h1>
   <div class="header-menu">
@@ -1053,7 +1038,6 @@ function loadAll(){
   renderWeek();
   renderShop();
   renderBatch();
-  renderBackupAlert();
 }
 
 // Applies a whole-state doc pulled from Supabase sync (see sync.js). Mirrors loadAll()'s
@@ -1073,7 +1057,6 @@ function applyState(doc){
   renderWeek();
   renderShop();
   renderBatch();
-  renderBackupAlert();
 }
 
 // True while the user is mid-edit somewhere a sync pull would clobber (typing in a form,
@@ -2479,9 +2462,6 @@ window.deleteShopExtra = async function(id){
 const GOOGLE_CLIENT_ID = '102552410450-jl9u86qhro3inldncn2sfhv4r08007hi.apps.googleusercontent.com';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const BACKUP_FILENAME = 'meal-rotation-backup.json';
-// See README "Adjusting or disabling the backup reminder" to change these.
-const BACKUP_REMINDER_DAYS = 60;
-const BACKUP_REMINDER_ALERT_ENABLED = true;
 
 let gisReady = false;
 let tokenClient = null;
@@ -2544,50 +2524,6 @@ async function findBackupFileId(token){
   return (data.files && data.files[0]) ? data.files[0].id : null;
 }
 
-async function downloadBackup(token, fileId){
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-    headers: { Authorization: 'Bearer ' + token }
-  });
-  if(!res.ok) throw new Error('download-failed');
-  return res.text();
-}
-
-// Merges backup meals into local meals by id: new ids are added, and for ids
-// present in both, whichever copy has the more recent lastMade wins (so
-// restoring doesn't clobber a meal that's been made more recently on this device).
-function mergeMeals(local, incoming){
-  const byId = new Map(local.map(m=>[m.id, m]));
-  let added = 0, updated = 0;
-  incoming.forEach(bm=>{
-    const lm = byId.get(bm.id);
-    if(!lm){
-      byId.set(bm.id, bm);
-      added++;
-    } else {
-      const bmTime = bm.lastMade ? new Date(bm.lastMade).getTime() : 0;
-      const lmTime = lm.lastMade ? new Date(lm.lastMade).getTime() : 0;
-      if(bmTime > lmTime){
-        byId.set(bm.id, bm);
-        updated++;
-      }
-    }
-  });
-  return { merged: Array.from(byId.values()), added, updated };
-}
-
-function mergeShopExtras(local, incoming){
-  const byId = new Map(local.map(x=>[x.id, x]));
-  incoming.forEach(ex=>{
-    if(!byId.has(ex.id)) byId.set(ex.id, ex);
-  });
-  return Array.from(byId.values());
-}
-
-function mergeShopNotes(local, incoming){
-  // Local notes win on conflict; any note-only-in-backup is added in.
-  return { ...incoming, ...local };
-}
-
 async function uploadBackup(token, jsonContent){
   const fileId = await findBackupFileId(token);
   if(fileId){
@@ -2641,90 +2577,12 @@ window.doBackup = async function(){
     const content = JSON.stringify({ meals, shopExtras, shopNotes, exportedAt: new Date().toISOString() });
     await uploadBackup(token, content);
     localStorage.setItem(STORAGE_PREFIX+'lastBackup', new Date().toISOString());
-    renderBackupAlert();
     renderBackupMenu('Backed up just now.');
     showToast('Backed up to Google Drive.', 'success');
   }catch(err){
     renderBackupMenu('Backup failed — try again.');
     showToast('Backup to Google Drive failed — try again.', 'error');
   }
-}
-
-window.doRestore = async function(){
-  renderBackupMenu('Connecting to Google…');
-  try{
-    if(GOOGLE_CLIENT_ID.indexOf('YOUR_CLIENT_ID') === 0){
-      renderBackupMenu('Not set up yet — add a Google client ID in the code first.');
-      showToast('Backup not set up yet — add a Google client ID in the code first.', 'error');
-      return;
-    }
-    await loadGis();
-    const token = await getAccessToken();
-    renderBackupMenu('Restoring…');
-    const fileId = await findBackupFileId(token);
-    if(!fileId){
-      renderBackupMenu('No backup found on Google Drive.');
-      showToast('No backup found on Google Drive.', 'error');
-      return;
-    }
-    const content = await downloadBackup(token, fileId);
-    const data = JSON.parse(content);
-    if(!Array.isArray(data.meals)) throw new Error('invalid-backup');
-    const { merged, added, updated } = mergeMeals(meals, data.meals);
-    meals = merged;
-    if(Array.isArray(data.shopExtras)){
-      shopExtras = mergeShopExtras(shopExtras, data.shopExtras);
-      saveShopExtras();
-    }
-    if(data.shopNotes && typeof data.shopNotes === 'object'){
-      shopNotes = mergeShopNotes(shopNotes, data.shopNotes);
-      saveShopNotes();
-    }
-    await saveMeals();
-    renderMeals();
-    renderWeek();
-    renderShop();
-    renderBatch();
-    renderBackupMenu('Restored just now.');
-    if(added || updated){
-      showToast(`Restored from Google Drive: ${added} added, ${updated} updated.`, 'success');
-    } else {
-      showToast('Restored from Google Drive — already up to date.', 'success');
-    }
-  }catch(err){
-    renderBackupMenu('Restore failed — try again.');
-    showToast('Restore from Google Drive failed — try again.', 'error');
-  }
-}
-
-function renderBackupAlert(){
-  const el = document.getElementById('backup-alert');
-  if(!el) return;
-  if(!BACKUP_REMINDER_ALERT_ENABLED || GOOGLE_CLIENT_ID.indexOf('YOUR_CLIENT_ID') === 0){
-    el.style.display = 'none';
-    return;
-  }
-  const last = localStorage.getItem(STORAGE_PREFIX+'lastBackup');
-  const ago = daysAgo(last);
-  const due = ago===null || ago>=BACKUP_REMINDER_DAYS;
-  if(!due){
-    el.style.display = 'none';
-    return;
-  }
-  const message = ago===null
-    ? "You haven't backed up to Google Drive yet."
-    : `It's been ${ago} days since your last Google Drive backup.`;
-  el.style.display = 'flex';
-  el.innerHTML = `
-    <div class="backup-alert-text">${message}</div>
-    <button class="btn-primary" onclick="doBackup()">Back up now</button>
-    <button class="backup-alert-dismiss" onclick="dismissBackupAlert()" aria-label="Dismiss">&times;</button>
-  `;
-}
-
-window.dismissBackupAlert = function(){
-  const el = document.getElementById('backup-alert');
-  if(el) el.style.display = 'none';
 }
 
 function syncStatusText(st){
@@ -2780,16 +2638,14 @@ function renderBackupMenu(statusOverride){
   if(!el) return;
   const last = localStorage.getItem(STORAGE_PREFIX+'lastBackup');
   const ago = daysAgo(last);
-  const due = ago===null || ago>=BACKUP_REMINDER_DAYS;
   let pillText;
   if(ago===null) pillText = 'never backed up';
   else if(ago===0) pillText = 'backed up today';
   else pillText = 'backed up ' + ago + 'd ago';
   el.innerHTML = `
     <div style="font-size:13px;color:var(--ink-soft);margin-bottom:10px;">Back up your meals to Google Drive.</div>
-    <span class="pill ${due?'stale':''}" style="margin-bottom:10px;display:inline-block;">${pillText}</span>
+    <span class="pill" style="margin-bottom:10px;display:inline-block;">${pillText}</span>
     <button class="btn-primary" style="width:100%;" onclick="doBackup()">Back up now</button>
-    <button class="btn-ghost" style="margin-top:8px;" onclick="doRestore()">Restore from backup</button>
     ${statusOverride ? `<div style="font-size:12px;color:var(--ink-faint);margin-top:8px;">${statusOverride}</div>` : ''}
   `;
 }
